@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: action_items
+      POSTGRES_PASSWORD: action_items
+      POSTGRES_DB: action_items
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U action_items"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  bot:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      GUILD_ID: ${GUILD_ID}
+      ACTION_ITEMS_CHANNEL_ID: ${ACTION_ITEMS_CHANNEL_ID}
+      APPROVER_USER_IDS: ${APPROVER_USER_IDS}
+      APPROVER_ROLE_ID: ${APPROVER_ROLE_ID}
+      DATABASE_URL: postgres://action_items:action_items@postgres:5432/action_items?sslmode=disable
+      HEALTH_PORT: 8080
+    ports:
+      - "8080:8080"
