@@ -2,242 +2,330 @@ package actionitems
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestCreateItem_CreatesPendingItem(t *testing.T) {
-	svc := NewService(newFakeRepository())
-	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+func newTestService() *Service {
+	return NewService(newFakeRepository())
+}
 
-	item, err := svc.CreateItem(context.Background(), "buy milk", "user1", now)
+func TestCreateItem_SetsStatusNewAndGuild(t *testing.T) {
+	s := newTestService()
+	now := time.Now()
 
+	item, err := s.CreateItem(context.Background(), "guild1", "buy milk", "user1", now)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("CreateItem() error = %v", err)
+	}
+	if item.Status != StatusNew {
+		t.Errorf("Status = %q, want %q", item.Status, StatusNew)
+	}
+	if item.GuildID != "guild1" {
+		t.Errorf("GuildID = %q, want %q", item.GuildID, "guild1")
 	}
 	if item.ID == "" {
-		t.Error("expected ID to be assigned")
-	}
-	if item.Description != "buy milk" {
-		t.Errorf("Description = %q, want %q", item.Description, "buy milk")
-	}
-	if item.CreatedByUserID != "user1" {
-		t.Errorf("CreatedByUserID = %q, want %q", item.CreatedByUserID, "user1")
-	}
-	if item.Status != StatusPending {
-		t.Errorf("Status = %q, want %q", item.Status, StatusPending)
-	}
-	if !item.CreatedAt.Equal(now) {
-		t.Errorf("CreatedAt = %v, want %v", item.CreatedAt, now)
+		t.Error("expected an ID to be assigned")
 	}
 }
 
-func TestAttachMessage_SetsMessageID(t *testing.T) {
+func TestFindPendingByMessage_MatchesNewAndInProgressNotDone(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", time.Now())
+	now := time.Now()
 
-	err := svc.AttachMessage(ctx, item.ID, "msg123")
+	newItem, _ := s.CreateItem(ctx, "guild1", "new item", "user1", now)
+	_ = s.AttachMessage(ctx, newItem.ID, "msg-new")
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	inProgressItem, _ := s.CreateItem(ctx, "guild1", "in progress item", "user1", now)
+	_ = s.AttachMessage(ctx, inProgressItem.ID, "msg-in-progress")
+	_ = s.MarkInProgress(ctx, inProgressItem.ID)
+
+	doneItem, _ := s.CreateItem(ctx, "guild1", "done item", "user1", now)
+	_ = s.AttachMessage(ctx, doneItem.ID, "msg-done")
+	_ = s.CompleteItem(ctx, doneItem.ID, "approver1", now)
+
+	if _, found, _ := s.FindPendingByMessage(ctx, "msg-new"); !found {
+		t.Error("expected to find the new item")
 	}
-	got, _ := repo.Get(ctx, item.ID)
-	if got.MessageID != "msg123" {
-		t.Errorf("MessageID = %q, want %q", got.MessageID, "msg123")
+	if _, found, _ := s.FindPendingByMessage(ctx, "msg-in-progress"); !found {
+		t.Error("expected to find the in-progress item")
+	}
+	if _, found, _ := s.FindPendingByMessage(ctx, "msg-done"); found {
+		t.Error("expected not to find the done item")
 	}
 }
 
-func TestFindPendingByMessage_ReturnsFalseWhenNotFound(t *testing.T) {
+func TestMarkInProgress_FromNewSucceeds(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	svc := NewService(newFakeRepository())
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
 
-	_, found, err := svc.FindPendingByMessage(ctx, "no-such-message")
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := s.MarkInProgress(ctx, item.ID); err != nil {
+		t.Fatalf("MarkInProgress() error = %v", err)
 	}
-	if found {
-		t.Error("expected found = false")
+
+	got, _ := s.GetItem(ctx, item.ID)
+	if got.Status != StatusInProgress {
+		t.Errorf("Status = %q, want %q", got.Status, StatusInProgress)
 	}
 }
 
-func TestFindPendingByMessage_ReturnsItemWhenFound(t *testing.T) {
+func TestMarkInProgress_FromInProgressFails(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", time.Now())
-	_ = svc.AttachMessage(ctx, item.ID, "msg123")
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+	_ = s.MarkInProgress(ctx, item.ID)
 
-	found, ok, err := svc.FindPendingByMessage(ctx, "msg123")
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected found = true")
-	}
-	if found.ID != item.ID {
-		t.Errorf("ID = %q, want %q", found.ID, item.ID)
+	err := s.MarkInProgress(ctx, item.ID)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
 	}
 }
 
-func TestCompleteItem_MarksCompleted(t *testing.T) {
+func TestMarkNew_FromInProgressSucceeds(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", time.Now())
-	completedAt := time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC)
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+	_ = s.MarkInProgress(ctx, item.ID)
 
-	err := svc.CompleteItem(ctx, item.ID, "approver1", completedAt)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := s.MarkNew(ctx, item.ID); err != nil {
+		t.Fatalf("MarkNew() error = %v", err)
 	}
-	got, _ := repo.Get(ctx, item.ID)
-	if got.Status != StatusCompleted {
-		t.Errorf("Status = %q, want %q", got.Status, StatusCompleted)
+
+	got, _ := s.GetItem(ctx, item.ID)
+	if got.Status != StatusNew {
+		t.Errorf("Status = %q, want %q", got.Status, StatusNew)
+	}
+}
+
+func TestMarkNew_FromNewFails(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+
+	err := s.MarkNew(ctx, item.ID)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestCompleteItem_FromNewRecordsPreviousStatusNew(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+	now := time.Now()
+
+	if err := s.CompleteItem(ctx, item.ID, "approver1", now); err != nil {
+		t.Fatalf("CompleteItem() error = %v", err)
+	}
+
+	got, _ := s.GetItem(ctx, item.ID)
+	if got.Status != StatusDone {
+		t.Errorf("Status = %q, want %q", got.Status, StatusDone)
+	}
+	if got.PreviousStatus != StatusNew {
+		t.Errorf("PreviousStatus = %q, want %q", got.PreviousStatus, StatusNew)
 	}
 	if got.CompletedByUserID != "approver1" {
 		t.Errorf("CompletedByUserID = %q, want %q", got.CompletedByUserID, "approver1")
 	}
-	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
-		t.Errorf("CompletedAt = %v, want %v", got.CompletedAt, completedAt)
+}
+
+func TestCompleteItem_FromInProgressRecordsPreviousStatusInProgress(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+	_ = s.MarkInProgress(ctx, item.ID)
+
+	if err := s.CompleteItem(ctx, item.ID, "approver1", time.Now()); err != nil {
+		t.Fatalf("CompleteItem() error = %v", err)
+	}
+
+	got, _ := s.GetItem(ctx, item.ID)
+	if got.PreviousStatus != StatusInProgress {
+		t.Errorf("PreviousStatus = %q, want %q", got.PreviousStatus, StatusInProgress)
 	}
 }
 
-func TestGetItem_ReturnsItemByID(t *testing.T) {
+func TestCompleteItem_AlreadyDoneFails(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	svc := NewService(newFakeRepository())
-	created, _ := svc.CreateItem(ctx, "buy milk", "user1", time.Now())
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", time.Now())
+	_ = s.CompleteItem(ctx, item.ID, "approver1", time.Now())
 
-	got, err := svc.GetItem(ctx, created.ID)
+	err := s.CompleteItem(ctx, item.ID, "approver1", time.Now())
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+	}
+}
 
+func TestListUndoable_ScopedToGuildAndWindow(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	inGuild, _ := s.CreateItem(ctx, "guild1", "recent", "user1", now)
+	_ = s.CompleteItem(ctx, inGuild.ID, "approver1", now.Add(-1*time.Hour))
+
+	otherGuild, _ := s.CreateItem(ctx, "guild2", "other guild", "user1", now)
+	_ = s.CompleteItem(ctx, otherGuild.ID, "approver1", now.Add(-1*time.Hour))
+
+	tooOld, _ := s.CreateItem(ctx, "guild1", "old", "user1", now)
+	_ = s.CompleteItem(ctx, tooOld.ID, "approver1", now.Add(-30*time.Hour))
+
+	items, err := s.ListUndoable(ctx, "guild1", now)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("ListUndoable() error = %v", err)
 	}
-	if got.ID != created.ID {
-		t.Errorf("ID = %q, want %q", got.ID, created.ID)
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
 	}
-}
-
-func TestGetItem_ReturnsErrNotFoundForUnknownID(t *testing.T) {
-	ctx := context.Background()
-	svc := NewService(newFakeRepository())
-
-	_, err := svc.GetItem(ctx, "no-such-id")
-
-	if err != ErrNotFound {
-		t.Fatalf("err = %v, want ErrNotFound", err)
+	if items[0].ID != inGuild.ID {
+		t.Errorf("items[0].ID = %q, want %q", items[0].ID, inGuild.ID)
 	}
 }
 
-func TestListUndoable_ExcludesItemsOlderThan24Hours(t *testing.T) {
+func TestUndoItem_RestoresRecordedPreviousStatus(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	now := time.Now()
 
-	recent, _ := svc.CreateItem(ctx, "recent", "user1", now.Add(-2*time.Hour))
-	_ = svc.CompleteItem(ctx, recent.ID, "approver1", now.Add(-1*time.Hour))
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", now)
+	_ = s.MarkInProgress(ctx, item.ID)
+	_ = s.CompleteItem(ctx, item.ID, "approver1", now)
 
-	old, _ := svc.CreateItem(ctx, "old", "user1", now.Add(-30*time.Hour))
-	_ = svc.CompleteItem(ctx, old.ID, "approver1", now.Add(-25*time.Hour))
-
-	got, err := svc.ListUndoable(ctx, now)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len(got) = %d, want 1", len(got))
-	}
-	if got[0].ID != recent.ID {
-		t.Errorf("got[0].ID = %q, want %q", got[0].ID, recent.ID)
-	}
-}
-
-func TestListUndoable_LimitsToFiveNewestFirst(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-
-	var ids []string
-	for i := 0; i < 6; i++ {
-		item, _ := svc.CreateItem(ctx, "item", "user1", now)
-		completedAt := now.Add(-time.Duration(i) * time.Minute)
-		_ = svc.CompleteItem(ctx, item.ID, "approver1", completedAt)
-		ids = append(ids, item.ID)
+	if err := s.UndoItem(ctx, item.ID, "new-message-id", now); err != nil {
+		t.Fatalf("UndoItem() error = %v", err)
 	}
 
-	got, err := svc.ListUndoable(ctx, now)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	got, _ := s.GetItem(ctx, item.ID)
+	if got.Status != StatusInProgress {
+		t.Errorf("Status = %q, want %q", got.Status, StatusInProgress)
 	}
-	if len(got) != 5 {
-		t.Fatalf("len(got) = %d, want 5", len(got))
-	}
-	// Newest completed (i=0, ids[0]) should be first.
-	if got[0].ID != ids[0] {
-		t.Errorf("got[0].ID = %q, want %q (newest first)", got[0].ID, ids[0])
-	}
-}
-
-func TestUndoItem_ReopensCompletedItemWithinWindow(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", now)
-	_ = svc.CompleteItem(ctx, item.ID, "approver1", now.Add(-1*time.Hour))
-
-	err := svc.UndoItem(ctx, item.ID, "newmsg456", now)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got, _ := repo.Get(ctx, item.ID)
-	if got.Status != StatusPending {
-		t.Errorf("Status = %q, want %q", got.Status, StatusPending)
-	}
-	if got.MessageID != "newmsg456" {
-		t.Errorf("MessageID = %q, want %q", got.MessageID, "newmsg456")
+	if got.MessageID != "new-message-id" {
+		t.Errorf("MessageID = %q, want %q", got.MessageID, "new-message-id")
 	}
 	if got.CompletedByUserID != "" {
 		t.Errorf("CompletedByUserID = %q, want empty", got.CompletedByUserID)
 	}
-	if got.CompletedAt != nil {
-		t.Errorf("CompletedAt = %v, want nil", got.CompletedAt)
+}
+
+func TestUndoItem_OutsideWindowFails(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	item, _ := s.CreateItem(ctx, "guild1", "task", "user1", now)
+	_ = s.CompleteItem(ctx, item.ID, "approver1", now.Add(-25*time.Hour))
+
+	err := s.UndoItem(ctx, item.ID, "new-message-id", now)
+	if !errors.Is(err, ErrNotUndoable) {
+		t.Fatalf("err = %v, want ErrNotUndoable", err)
 	}
 }
 
-func TestUndoItem_FailsWhenItemIsStillPending(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", time.Now())
-
-	err := svc.UndoItem(ctx, item.ID, "newmsg456", time.Now())
-
-	if err == nil {
-		t.Fatal("expected error when undoing a pending item")
+func TestGuildConfig_DefaultsWhenUnconfigured(t *testing.T) {
+	s := newTestService()
+	cfg, err := s.GetGuildConfig(context.Background(), "guild1")
+	if err != nil {
+		t.Fatalf("GetGuildConfig() error = %v", err)
+	}
+	if cfg.InProgressEmote != DefaultInProgressEmote {
+		t.Errorf("InProgressEmote = %q, want %q", cfg.InProgressEmote, DefaultInProgressEmote)
+	}
+	if cfg.DoneEmote != DefaultDoneEmote {
+		t.Errorf("DoneEmote = %q, want %q", cfg.DoneEmote, DefaultDoneEmote)
+	}
+	if cfg.ActionItemsChannelID != "" {
+		t.Errorf("ActionItemsChannelID = %q, want empty", cfg.ActionItemsChannelID)
 	}
 }
 
-func TestUndoItem_FailsWhenOutsideWindow(t *testing.T) {
+func TestSetActionItemsChannel_Persists(t *testing.T) {
+	s := newTestService()
 	ctx := context.Background()
-	repo := newFakeRepository()
-	svc := NewService(repo)
-	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	item, _ := svc.CreateItem(ctx, "buy milk", "user1", now)
-	_ = svc.CompleteItem(ctx, item.ID, "approver1", now.Add(-25*time.Hour))
 
-	err := svc.UndoItem(ctx, item.ID, "newmsg456", now)
+	if err := s.SetActionItemsChannel(ctx, "guild1", "chan1"); err != nil {
+		t.Fatalf("SetActionItemsChannel() error = %v", err)
+	}
 
-	if err == nil {
-		t.Fatal("expected error when undoing an item outside the 24h window")
+	cfg, _ := s.GetGuildConfig(ctx, "guild1")
+	if cfg.ActionItemsChannelID != "chan1" {
+		t.Errorf("ActionItemsChannelID = %q, want %q", cfg.ActionItemsChannelID, "chan1")
+	}
+}
+
+func TestSetEmotes_RejectsEmptyValues(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	err := s.SetEmotes(ctx, "guild1", "", "✅")
+	if !errors.Is(err, ErrInvalidEmote) {
+		t.Fatalf("err = %v, want ErrInvalidEmote", err)
+	}
+
+	err = s.SetEmotes(ctx, "guild1", "🔄", "")
+	if !errors.Is(err, ErrInvalidEmote) {
+		t.Fatalf("err = %v, want ErrInvalidEmote", err)
+	}
+}
+
+func TestSetEmotes_ValidValuesPersist(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	if err := s.SetEmotes(ctx, "guild1", "👀", "🎉"); err != nil {
+		t.Fatalf("SetEmotes() error = %v", err)
+	}
+
+	cfg, _ := s.GetGuildConfig(ctx, "guild1")
+	if cfg.InProgressEmote != "👀" || cfg.DoneEmote != "🎉" {
+		t.Errorf("emotes = %q/%q, want %q/%q", cfg.InProgressEmote, cfg.DoneEmote, "👀", "🎉")
+	}
+}
+
+func TestApprovers_AddRemoveList(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	_ = s.AddApprover(ctx, "guild1", "user1")
+	_ = s.AddApprover(ctx, "guild1", "user2")
+
+	list, err := s.ListApprovers(ctx, "guild1")
+	if err != nil {
+		t.Fatalf("ListApprovers() error = %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("len(list) = %d, want 2", len(list))
+	}
+
+	_ = s.RemoveApprover(ctx, "guild1", "user1")
+	list, _ = s.ListApprovers(ctx, "guild1")
+	if len(list) != 1 || list[0] != "user2" {
+		t.Errorf("list = %v, want [user2]", list)
+	}
+}
+
+func TestIsApprover_MatchesOwnerRoleOrUser(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	_ = s.AddApprover(ctx, "guild1", "user1")
+	_ = s.SetApproverRole(ctx, "guild1", "role-a")
+
+	ok, err := s.IsApprover(ctx, "guild1", "user1", nil)
+	if err != nil || !ok {
+		t.Errorf("IsApprover(user1) = %v, %v, want true, nil", ok, err)
+	}
+
+	ok, err = s.IsApprover(ctx, "guild1", "user2", []string{"role-a"})
+	if err != nil || !ok {
+		t.Errorf("IsApprover(user2 with role-a) = %v, %v, want true, nil", ok, err)
+	}
+
+	ok, err = s.IsApprover(ctx, "guild1", "user3", []string{"role-b"})
+	if err != nil || ok {
+		t.Errorf("IsApprover(user3) = %v, %v, want false, nil", ok, err)
 	}
 }

@@ -2,34 +2,37 @@ package actionitems
 
 import "testing"
 
-func TestApproverChecker_UserIDInList(t *testing.T) {
-	checker := ApproverChecker{UserIDs: []string{"user1", "user2"}}
-
-	if !checker.IsApprover("user1", nil) {
-		t.Error("expected user1 to be an approver")
+func TestIsApproverMatch_UserInList(t *testing.T) {
+	got := isApproverMatch("user1", nil, []string{"user1", "user2"}, "")
+	if !got {
+		t.Error("expected user1 to match")
 	}
 }
 
-func TestApproverChecker_UserHasApproverRole(t *testing.T) {
-	checker := ApproverChecker{RoleID: "role1"}
-
-	if !checker.IsApprover("someuser", []string{"role1", "otherrole"}) {
-		t.Error("expected user with role1 to be an approver")
+func TestIsApproverMatch_UserNotInListNoRole(t *testing.T) {
+	got := isApproverMatch("user3", nil, []string{"user1", "user2"}, "")
+	if got {
+		t.Error("expected user3 not to match")
 	}
 }
 
-func TestApproverChecker_NeitherMatches(t *testing.T) {
-	checker := ApproverChecker{UserIDs: []string{"user1"}, RoleID: "role1"}
-
-	if checker.IsApprover("someuser", []string{"otherrole"}) {
-		t.Error("expected user to not be an approver")
+func TestIsApproverMatch_RoleMatch(t *testing.T) {
+	got := isApproverMatch("user3", []string{"role-a", "role-b"}, nil, "role-a")
+	if !got {
+		t.Error("expected role-a to match")
 	}
 }
 
-func TestApproverChecker_EmptyRoleIDNeverMatches(t *testing.T) {
-	checker := ApproverChecker{UserIDs: []string{"user1"}}
+func TestIsApproverMatch_NoRoleConfiguredIgnoresMemberRoles(t *testing.T) {
+	got := isApproverMatch("user3", []string{"role-a"}, nil, "")
+	if got {
+		t.Error("expected no match when no approver role is configured")
+	}
+}
 
-	if checker.IsApprover("someuser", []string{""}) {
-		t.Error("empty RoleID should never match an empty role entry")
+func TestIsApproverMatch_NeitherUserNorRoleMatches(t *testing.T) {
+	got := isApproverMatch("user3", []string{"role-b"}, []string{"user1"}, "role-a")
+	if got {
+		t.Error("expected no match")
 	}
 }
