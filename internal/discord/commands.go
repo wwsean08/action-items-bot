@@ -210,3 +210,65 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		log.Printf("confirming undo: %v", err)
 	}
 }
+
+func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	if err != nil {
+		log.Printf("checking approver: %v", err)
+		_ = respondEphemeral(s, i, "Failed to check permissions.")
+		return
+	}
+	if !allowed {
+		_ = respondEphemeral(s, i, "You are not authorized to manage approvers.")
+		return
+	}
+
+	opts := i.ApplicationCommandData().Options
+	if len(opts) == 0 {
+		_ = respondEphemeral(s, i, "Missing subcommand.")
+		return
+	}
+	sub := opts[0]
+
+	switch sub.Name {
+	case "add":
+		userID := subOptionUserID(sub.Options)
+		if userID == "" {
+			_ = respondEphemeral(s, i, "No user specified.")
+			return
+		}
+		if err := b.service.AddApprover(ctx, i.GuildID, userID); err != nil {
+			log.Printf("add approver: %v", err)
+			_ = respondEphemeral(s, i, "Failed to add approver.")
+			return
+		}
+		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
+			log.Printf("syncing help message: %v", err)
+		}
+		_ = respondEphemeral(s, i, fmt.Sprintf("Added <@%s> as an approver.", userID))
+	case "remove":
+		userID := subOptionUserID(sub.Options)
+		if userID == "" {
+			_ = respondEphemeral(s, i, "No user specified.")
+			return
+		}
+		if err := b.service.RemoveApprover(ctx, i.GuildID, userID); err != nil {
+			log.Printf("remove approver: %v", err)
+			_ = respondEphemeral(s, i, "Failed to remove approver.")
+			return
+		}
+		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
+			log.Printf("syncing help message: %v", err)
+		}
+		_ = respondEphemeral(s, i, fmt.Sprintf("Removed <@%s> as an approver.", userID))
+	case "list":
+		approvers, err := b.service.ListApprovers(ctx, i.GuildID)
+		if err != nil {
+			log.Printf("list approvers: %v", err)
+			_ = respondEphemeral(s, i, "Failed to list approvers.")
+			return
+		}
+		_ = respondEphemeral(s, i, approverListText(approvers))
+	}
+}
