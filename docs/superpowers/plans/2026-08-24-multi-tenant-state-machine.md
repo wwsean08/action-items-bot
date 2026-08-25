@@ -2953,10 +2953,10 @@ func (b *Bot) syncHelpMessage(ctx context.Context, guildID string) error {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes — package build is still expected to fail**
 
 Run: `go test ./internal/discord/... -run TestHelpMessageBody -v`
-Expected: PASS, both cases.
+Expected: FAIL to build the whole package — `reactions.go` still references the pre-multi-tenant API (`b.actionItemsChannelID`, `b.isApprover`) removed back in Task 4, and isn't rewritten until Task 10. This is expected, matching the pattern already used in Tasks 5-8. To confirm the new test logic itself is correct in isolation, run `go vet internal/discord/help_message.go internal/discord/help_message_test.go` and read through the two cases by hand; full green for this package comes after Task 10.
 
 - [ ] **Step 5: Commit**
 
