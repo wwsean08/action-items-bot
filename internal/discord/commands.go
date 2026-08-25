@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+
+	"github.com/wwsean08/action-items-bot/internal/actionitems"
 )
 
 const undoSelectCustomID = "undo_select"
@@ -19,26 +21,54 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleActionItemCommand(s, i)
 		case "undo":
 			b.handleUndoCommand(s, i)
+		case "approver":
+			b.handleApproverCommand(s, i)
+		case "config":
+			b.handleConfigCommand(s, i)
 		}
 	case discordgo.InteractionMessageComponent:
-		if i.MessageComponentData().CustomID == undoSelectCustomID {
+		switch i.MessageComponentData().CustomID {
+		case undoSelectCustomID:
 			b.handleUndoSelect(s, i)
+		case configChannelSelectCustomID:
+			b.handleConfigChannelSelect(s, i)
+		case configRoleSelectCustomID:
+			b.handleConfigRoleSelect(s, i)
+		case configEditEmotesButtonCustomID:
+			b.handleConfigEditEmotesButton(s, i)
+		}
+	case discordgo.InteractionModalSubmit:
+		if i.ModalSubmitData().CustomID == configEmotesModalCustomID {
+			b.handleConfigEmotesModalSubmit(s, i)
 		}
 	}
 }
 
 func (b *Bot) handleActionItemCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
+	guildID := i.GuildID
 	text := actionItemText(i.ApplicationCommandData().Options)
 
-	item, err := b.service.CreateItem(ctx, text, i.Member.User.ID, time.Now())
+	cfg, err := b.service.GetGuildConfig(ctx, guildID)
+	if err != nil {
+		log.Printf("get guild config: %v", err)
+		_ = respondEphemeral(s, i, "Failed to create action item.")
+		return
+	}
+	if cfg.ActionItemsChannelID == "" {
+		_ = respondEphemeral(s, i, "This server hasn't configured an action items channel yet. Ask an approver to run /config.")
+		return
+	}
+
+	item, err := b.service.CreateItem(ctx, guildID, text, i.Member.User.ID, time.Now())
 	if err != nil {
 		log.Printf("create action item: %v", err)
 		_ = respondEphemeral(s, i, "Failed to create action item.")
 		return
 	}
 
-	msg, err := s.ChannelMessageSend(b.actionItemsChannelID, text)
+	posted := prefixForStatus(actionitems.StatusNew) + text
+	msg, err := s.ChannelMessageSend(cfg.ActionItemsChannelID, posted)
 	if err != nil {
 		log.Printf("posting action item message: %v", err)
 		_ = respondEphemeral(s, i, "Created, but failed to post to the action items channel.")
@@ -65,18 +95,25 @@ func (b *Bot) handleActionItemCommand(s *discordgo.Session, i *discordgo.Interac
 		log.Printf("fetching interaction response: %v", err)
 		return
 	}
-	if err := s.MessageReactionAdd(reply.ChannelID, reply.ID, doneEmoji); err != nil {
+	if err := s.MessageReactionAdd(reply.ChannelID, reply.ID, commandAckEmoji); err != nil {
 		log.Printf("reacting to confirmation: %v", err)
 	}
 }
 
 func (b *Bot) handleUndoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !b.isApprover(i.Member) {
+	ctx := context.Background()
+	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	if err != nil {
+		log.Printf("checking approver: %v", err)
+		_ = respondEphemeral(s, i, "Failed to check permissions.")
+		return
+	}
+	if !allowed {
 		_ = respondEphemeral(s, i, "You are not authorized to undo action items.")
 		return
 	}
 
-	items, err := b.service.ListUndoable(context.Background(), time.Now())
+	items, err := b.service.ListUndoable(ctx, i.GuildID, time.Now())
 	if err != nil {
 		log.Printf("list undoable: %v", err)
 		_ = respondEphemeral(s, i, "Failed to look up recent completions.")
@@ -111,7 +148,14 @@ func (b *Bot) handleUndoCommand(s *discordgo.Session, i *discordgo.InteractionCr
 }
 
 func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !b.isApprover(i.Member) {
+	ctx := context.Background()
+	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	if err != nil {
+		log.Printf("checking approver: %v", err)
+		_ = respondEphemeral(s, i, "Failed to check permissions.")
+		return
+	}
+	if !allowed {
 		_ = respondEphemeral(s, i, "You are not authorized to undo action items.")
 		return
 	}
@@ -122,7 +166,6 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 	itemID := values[0]
-	ctx := context.Background()
 
 	item, err := b.service.GetItem(ctx, itemID)
 	if err != nil {
@@ -131,7 +174,19 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	msg, err := s.ChannelMessageSend(b.actionItemsChannelID, item.Description)
+	cfg, err := b.service.GetGuildConfig(ctx, i.GuildID)
+	if err != nil {
+		log.Printf("get guild config: %v", err)
+		_ = respondEphemeral(s, i, "Failed to restore that action item.")
+		return
+	}
+
+	restoreStatus := item.PreviousStatus
+	if restoreStatus == "" {
+		restoreStatus = actionitems.StatusNew
+	}
+	posted := prefixForStatus(restoreStatus) + item.Description
+	msg, err := s.ChannelMessageSend(cfg.ActionItemsChannelID, posted)
 	if err != nil {
 		log.Printf("reposting action item: %v", err)
 		_ = respondEphemeral(s, i, "Failed to repost the action item.")
