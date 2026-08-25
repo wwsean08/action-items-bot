@@ -8,17 +8,14 @@ import (
 	"github.com/wwsean08/action-items-bot/internal/actionitems"
 )
 
-const doneEmoji = "✅" // ✅
+const commandAckEmoji = "✅"
 
 type Bot struct {
-	Session              *discordgo.Session
-	service              *actionitems.Service
-	approvers            actionitems.ApproverChecker
-	guildID              string
-	actionItemsChannelID string
+	Session *discordgo.Session
+	service *actionitems.Service
 }
 
-func New(token string, service *actionitems.Service, approvers actionitems.ApproverChecker, guildID, actionItemsChannelID string) (*Bot, error) {
+func New(token string, service *actionitems.Service) (*Bot, error) {
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		return nil, fmt.Errorf("creating discord session: %w", err)
@@ -29,14 +26,12 @@ func New(token string, service *actionitems.Service, approvers actionitems.Appro
 		discordgo.IntentsGuildMembers
 
 	b := &Bot{
-		Session:              session,
-		service:              service,
-		approvers:            approvers,
-		guildID:              guildID,
-		actionItemsChannelID: actionItemsChannelID,
+		Session: session,
+		service: service,
 	}
 	session.AddHandler(b.handleInteraction)
 	session.AddHandler(b.handleReactionAdd)
+	session.AddHandler(b.handleReactionRemove)
 	return b, nil
 }
 
@@ -48,8 +43,8 @@ func (b *Bot) Close() error {
 	return b.Session.Close()
 }
 
-// RegisterCommands registers the /action-item and /undo slash commands for
-// the configured guild. Must be called after Open.
+// RegisterCommands registers the bot's slash commands globally, so they
+// work in any guild the bot is invited to without a per-guild step.
 func (b *Bot) RegisterCommands() error {
 	commands := []*discordgo.ApplicationCommand{
 		{
@@ -68,19 +63,43 @@ func (b *Bot) RegisterCommands() error {
 			Name:        "undo",
 			Description: "Undo a recently completed action item",
 		},
+		{
+			Name:        "approver",
+			Description: "Manage who can transition and undo action items",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "add",
+					Description: "Add an approver",
+					Options: []*discordgo.ApplicationCommandOption{
+						{Type: discordgo.ApplicationCommandOptionUser, Name: "user", Description: "User to add", Required: true},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "remove",
+					Description: "Remove an approver",
+					Options: []*discordgo.ApplicationCommandOption{
+						{Type: discordgo.ApplicationCommandOptionUser, Name: "user", Description: "User to remove", Required: true},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "list",
+					Description: "List configured approvers",
+				},
+			},
+		},
+		{
+			Name:        "config",
+			Description: "Open the action items configuration panel",
+		},
 	}
 
 	for _, cmd := range commands {
-		if _, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, b.guildID, cmd); err != nil {
+		if _, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, "", cmd); err != nil {
 			return fmt.Errorf("registering command %s: %w", cmd.Name, err)
 		}
 	}
 	return nil
-}
-
-func (b *Bot) isApprover(member *discordgo.Member) bool {
-	if member == nil || member.User == nil {
-		return false
-	}
-	return b.approvers.IsApprover(member.User.ID, member.Roles)
 }
