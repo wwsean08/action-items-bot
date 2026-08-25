@@ -33,9 +33,8 @@ func main() {
 	defer repo.Close()
 
 	service := actionitems.NewService(repo)
-	approvers := actionitems.ApproverChecker{UserIDs: cfg.ApproverUserIDs, RoleID: cfg.ApproverRoleID}
 
-	bot, err := discord.New(cfg.DiscordToken, service, approvers, cfg.GuildID, cfg.ActionItemsChannelID)
+	bot, err := discord.New(cfg.DiscordToken, service)
 	if err != nil {
 		log.Fatalf("creating bot: %v", err)
 	}

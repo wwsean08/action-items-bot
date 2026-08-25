@@ -20,10 +20,6 @@ services:
         condition: service_healthy
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
-      GUILD_ID: ${GUILD_ID}
-      ACTION_ITEMS_CHANNEL_ID: ${ACTION_ITEMS_CHANNEL_ID}
-      APPROVER_USER_IDS: ${APPROVER_USER_IDS}
-      APPROVER_ROLE_ID: ${APPROVER_ROLE_ID}
       DATABASE_URL: postgres://action_items:action_items@postgres:5432/action_items?sslmode=disable
       HEALTH_PORT: 8080
     ports:
