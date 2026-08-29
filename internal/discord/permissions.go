@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"log"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -35,4 +36,21 @@ func (b *Bot) resolveMember(s *discordgo.Session, guildID, userID string, embedd
 		return embedded, nil
 	}
 	return s.GuildMember(guildID, userID)
+}
+
+// requireOwnerOrApprover checks isOwnerOrApprover and, on denial or error,
+// responds to the interaction and returns false. Callers should return
+// immediately when this returns false.
+func (b *Bot) requireOwnerOrApprover(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, denyMsg string) bool {
+	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	if err != nil {
+		log.Printf("checking approver: %v", err)
+		_ = respondEphemeral(s, i, "Failed to check permissions.")
+		return false
+	}
+	if !allowed {
+		_ = respondEphemeral(s, i, denyMsg)
+		return false
+	}
+	return true
 }

@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/bwmarrin/discordgo"
+
 	"github.com/wwsean08/action-items-bot/internal/actionitems"
 )
 
@@ -61,13 +63,21 @@ func (b *Bot) syncHelpMessage(ctx context.Context, guildID string) error {
 	content := helpMessageBody(cfg, guild.OwnerID, approvers)
 
 	if cfg.HelpMessageID != "" {
-		if _, err := b.Session.ChannelMessageEdit(cfg.ActionItemsChannelID, cfg.HelpMessageID, content); err == nil {
+		if _, err := b.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:         cfg.ActionItemsChannelID,
+			ID:              cfg.HelpMessageID,
+			Content:         &content,
+			AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+		}); err == nil {
 			return nil
 		}
 		log.Printf("editing help message failed for guild %s, reposting", guildID)
 	}
 
-	msg, err := b.Session.ChannelMessageSend(cfg.ActionItemsChannelID, content)
+	msg, err := b.Session.ChannelMessageSendComplex(cfg.ActionItemsChannelID, &discordgo.MessageSend{
+		Content:         content,
+		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+	})
 	if err != nil {
 		return fmt.Errorf("posting help message: %w", err)
 	}

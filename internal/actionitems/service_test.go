@@ -272,6 +272,16 @@ func TestSetEmotes_RejectsEmptyValues(t *testing.T) {
 	}
 }
 
+func TestSetEmotes_RejectsIdenticalEmotes(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	err := s.SetEmotes(ctx, "guild1", "✅", "✅")
+	if !errors.Is(err, ErrInvalidEmote) {
+		t.Fatalf("err = %v, want ErrInvalidEmote", err)
+	}
+}
+
 func TestSetEmotes_ValidValuesPersist(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()

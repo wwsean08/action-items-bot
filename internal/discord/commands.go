@@ -68,7 +68,10 @@ func (b *Bot) handleActionItemCommand(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	posted := prefixForStatus(actionitems.StatusNew) + text
-	msg, err := s.ChannelMessageSend(cfg.ActionItemsChannelID, posted)
+	msg, err := s.ChannelMessageSendComplex(cfg.ActionItemsChannelID, &discordgo.MessageSend{
+		Content:         posted,
+		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+	})
 	if err != nil {
 		log.Printf("posting action item message: %v", err)
 		_ = respondEphemeral(s, i, "Created, but failed to post to the action items channel.")
@@ -186,7 +189,10 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		restoreStatus = actionitems.StatusNew
 	}
 	posted := prefixForStatus(restoreStatus) + item.Description
-	msg, err := s.ChannelMessageSend(cfg.ActionItemsChannelID, posted)
+	msg, err := s.ChannelMessageSendComplex(cfg.ActionItemsChannelID, &discordgo.MessageSend{
+		Content:         posted,
+		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+	})
 	if err != nil {
 		log.Printf("reposting action item: %v", err)
 		_ = respondEphemeral(s, i, "Failed to repost the action item.")
@@ -243,10 +249,10 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			_ = respondEphemeral(s, i, "Failed to add approver.")
 			return
 		}
+		_ = respondEphemeral(s, i, fmt.Sprintf("Added <@%s> as an approver.", userID))
 		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 			log.Printf("syncing help message: %v", err)
 		}
-		_ = respondEphemeral(s, i, fmt.Sprintf("Added <@%s> as an approver.", userID))
 	case "remove":
 		userID := subOptionUserID(sub.Options)
 		if userID == "" {
@@ -258,10 +264,10 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			_ = respondEphemeral(s, i, "Failed to remove approver.")
 			return
 		}
+		_ = respondEphemeral(s, i, fmt.Sprintf("Removed <@%s> as an approver.", userID))
 		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 			log.Printf("syncing help message: %v", err)
 		}
-		_ = respondEphemeral(s, i, fmt.Sprintf("Removed <@%s> as an approver.", userID))
 	case "list":
 		approvers, err := b.service.ListApprovers(ctx, i.GuildID)
 		if err != nil {

@@ -122,6 +122,9 @@ func (s *Service) SetEmotes(ctx context.Context, guildID, inProgressEmote, doneE
 	if inProgressEmote == "" || doneEmote == "" {
 		return ErrInvalidEmote
 	}
+	if inProgressEmote == doneEmote {
+		return ErrInvalidEmote
+	}
 	return s.repo.SetEmotes(ctx, guildID, inProgressEmote, doneEmote)
 }
 

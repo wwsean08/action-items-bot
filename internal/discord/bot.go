@@ -50,6 +50,7 @@ func (b *Bot) RegisterCommands() error {
 		{
 			Name:        "action-item",
 			Description: "Create a new action item",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -62,10 +63,12 @@ func (b *Bot) RegisterCommands() error {
 		{
 			Name:        "undo",
 			Description: "Undo a recently completed action item",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 		{
 			Name:        "approver",
 			Description: "Manage who can transition and undo action items",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -93,6 +96,7 @@ func (b *Bot) RegisterCommands() error {
 		{
 			Name:        "config",
 			Description: "Open the action items configuration panel",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 	}
 

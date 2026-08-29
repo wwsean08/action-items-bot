@@ -60,7 +60,13 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 			log.Printf("marking in progress: %v", err)
 			return
 		}
-		if _, err := s.ChannelMessageEdit(r.ChannelID, r.MessageID, prefixForStatus(actionitems.StatusInProgress)+item.Description); err != nil {
+		content := prefixForStatus(actionitems.StatusInProgress) + item.Description
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:         r.ChannelID,
+			ID:              r.MessageID,
+			Content:         &content,
+			AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+		}); err != nil {
 			log.Printf("editing message for in-progress: %v", err)
 		}
 	case actionitems.StatusDone:
@@ -117,7 +123,13 @@ func (b *Bot) handleReactionRemove(s *discordgo.Session, r *discordgo.MessageRea
 		log.Printf("marking new: %v", err)
 		return
 	}
-	if _, err := s.ChannelMessageEdit(r.ChannelID, r.MessageID, prefixForStatus(actionitems.StatusNew)+item.Description); err != nil {
+	content := prefixForStatus(actionitems.StatusNew) + item.Description
+	if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:         r.ChannelID,
+		ID:              r.MessageID,
+		Content:         &content,
+		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+	}); err != nil {
 		log.Printf("editing message for new: %v", err)
 	}
 }

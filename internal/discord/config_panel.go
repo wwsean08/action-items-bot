@@ -88,14 +88,7 @@ func configPanelComponents(cfg actionitems.GuildConfig) []discordgo.MessageCompo
 
 func (b *Bot) handleConfigCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
-	if err != nil {
-		log.Printf("checking approver: %v", err)
-		_ = respondEphemeral(s, i, "Failed to check permissions.")
-		return
-	}
-	if !allowed {
-		_ = respondEphemeral(s, i, "You are not authorized to configure this server's action items.")
+	if !b.requireOwnerOrApprover(ctx, s, i, "You are not authorized to configure this server's action items.") {
 		return
 	}
 
@@ -124,6 +117,15 @@ func (b *Bot) updateConfigPanel(s *discordgo.Session, i *discordgo.InteractionCr
 	cfg, err := b.service.GetGuildConfig(ctx, i.GuildID)
 	if err != nil {
 		log.Printf("get guild config: %v", err)
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    "Saved, but failed to refresh the panel. Run /config again to see the latest state.",
+				Components: []discordgo.MessageComponent{},
+			},
+		}); err != nil {
+			log.Printf("responding after config panel refresh failure: %v", err)
+		}
 		return
 	}
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -140,9 +142,7 @@ func (b *Bot) updateConfigPanel(s *discordgo.Session, i *discordgo.InteractionCr
 
 func (b *Bot) handleConfigChannelSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
-	if err != nil || !allowed {
-		_ = respondEphemeral(s, i, "You are not authorized to configure this server's action items.")
+	if !b.requireOwnerOrApprover(ctx, s, i, "You are not authorized to configure this server's action items.") {
 		return
 	}
 
@@ -157,17 +157,15 @@ func (b *Bot) handleConfigChannelSelect(s *discordgo.Session, i *discordgo.Inter
 		_ = respondEphemeral(s, i, "Failed to save the channel.")
 		return
 	}
+	b.updateConfigPanel(s, i)
 	if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 		log.Printf("syncing help message: %v", err)
 	}
-	b.updateConfigPanel(s, i)
 }
 
 func (b *Bot) handleConfigRoleSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
-	if err != nil || !allowed {
-		_ = respondEphemeral(s, i, "You are not authorized to configure this server's action items.")
+	if !b.requireOwnerOrApprover(ctx, s, i, "You are not authorized to configure this server's action items.") {
 		return
 	}
 
@@ -181,17 +179,15 @@ func (b *Bot) handleConfigRoleSelect(s *discordgo.Session, i *discordgo.Interact
 		_ = respondEphemeral(s, i, "Failed to save the approver role.")
 		return
 	}
+	b.updateConfigPanel(s, i)
 	if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 		log.Printf("syncing help message: %v", err)
 	}
-	b.updateConfigPanel(s, i)
 }
 
 func (b *Bot) handleConfigEditEmotesButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
-	if err != nil || !allowed {
-		_ = respondEphemeral(s, i, "You are not authorized to configure this server's action items.")
+	if !b.requireOwnerOrApprover(ctx, s, i, "You are not authorized to configure this server's action items.") {
 		return
 	}
 
@@ -242,9 +238,7 @@ func (b *Bot) handleConfigEditEmotesButton(s *discordgo.Session, i *discordgo.In
 
 func (b *Bot) handleConfigEmotesModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
-	if err != nil || !allowed {
-		_ = respondEphemeral(s, i, "You are not authorized to configure this server's action items.")
+	if !b.requireOwnerOrApprover(ctx, s, i, "You are not authorized to configure this server's action items.") {
 		return
 	}
 
@@ -255,14 +249,14 @@ func (b *Bot) handleConfigEmotesModalSubmit(s *discordgo.Session, i *discordgo.I
 		_ = respondEphemeral(s, i, "Failed to save emotes. Make sure both fields are filled in.")
 		return
 	}
-	if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
-		log.Printf("syncing help message: %v", err)
-	}
 
 	cfg, err := b.service.GetGuildConfig(ctx, i.GuildID)
 	if err != nil {
 		log.Printf("get guild config: %v", err)
 		_ = respondEphemeral(s, i, "Emotes saved.")
+		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
+			log.Printf("syncing help message: %v", err)
+		}
 		return
 	}
 
@@ -275,5 +269,8 @@ func (b *Bot) handleConfigEmotesModalSubmit(s *discordgo.Session, i *discordgo.I
 	})
 	if err != nil {
 		log.Printf("updating config panel after emotes: %v", err)
+	}
+	if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
+		log.Printf("syncing help message: %v", err)
 	}
 }

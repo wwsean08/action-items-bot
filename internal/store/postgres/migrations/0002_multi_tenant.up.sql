@@ -1,3 +1,11 @@
+-- This migration adds `guild_id TEXT NOT NULL` to action_items with no
+-- default. It will fail with "column contains null values" if action_items
+-- has any existing rows. If upgrading a pre-multi-tenant deployment,
+-- truncate the table first: TRUNCATE action_items;
+-- If this migration fails partway through, golang-migrate will leave the
+-- schema_migrations table marked dirty; after fixing the underlying issue,
+-- you'll need `migrate force <version>` (or your driver's equivalent) to
+-- clear the dirty flag before retrying.
 ALTER TABLE action_items ADD COLUMN guild_id TEXT NOT NULL;
 ALTER TABLE action_items ADD COLUMN previous_status TEXT NOT NULL DEFAULT '';
 
