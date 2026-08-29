@@ -96,14 +96,21 @@ func (s *Service) ListUndoable(ctx context.Context, guildID string, now time.Tim
 
 // SearchCompleted returns up to searchLimit done action items in the guild
 // whose description contains query (case-insensitive), most recently
-// completed first. Unlike ListUndoable it searches the full history with no
-// time cutoff.
-func (s *Service) SearchCompleted(ctx context.Context, guildID, query string) ([]ActionItem, error) {
+// completed first, plus whether more matches exist beyond what's returned.
+// Unlike ListUndoable it searches the full history with no time cutoff.
+func (s *Service) SearchCompleted(ctx context.Context, guildID, query string) (items []ActionItem, hasMore bool, err error) {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
-		return nil, ErrEmptyQuery
+		return nil, false, ErrEmptyQuery
 	}
-	return s.repo.SearchCompleted(ctx, guildID, trimmed, searchLimit)
+	results, err := s.repo.SearchCompleted(ctx, guildID, trimmed, searchLimit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(results) > searchLimit {
+		return results[:searchLimit], true, nil
+	}
+	return results, false, nil
 }
 
 func (s *Service) UndoItem(ctx context.Context, id, newMessageID string, now time.Time) error {

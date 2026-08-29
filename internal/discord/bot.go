@@ -43,10 +43,12 @@ func (b *Bot) Close() error {
 	return b.Session.Close()
 }
 
-// RegisterCommands registers the bot's slash commands globally, so they
-// work in any guild the bot is invited to without a per-guild step.
-func (b *Bot) RegisterCommands() error {
-	commands := []*discordgo.ApplicationCommand{
+// commandDefinitions returns the bot's slash command definitions. Kept as a
+// package-level function (rather than inline in RegisterCommands) so the
+// command set — including deliberate omissions like /search having no
+// DefaultMemberPermissions — is plain data a test can assert on.
+func commandDefinitions() []*discordgo.ApplicationCommand {
+	return []*discordgo.ApplicationCommand{
 		{
 			Name:        "action-item",
 			Description: "Create a new action item",
@@ -112,8 +114,12 @@ func (b *Bot) RegisterCommands() error {
 			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 	}
+}
 
-	for _, cmd := range commands {
+// RegisterCommands registers the bot's slash commands globally, so they
+// work in any guild the bot is invited to without a per-guild step.
+func (b *Bot) RegisterCommands() error {
+	for _, cmd := range commandDefinitions() {
 		if _, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, "", cmd); err != nil {
 			return fmt.Errorf("registering command %s: %w", cmd.Name, err)
 		}

@@ -228,7 +228,7 @@ func (b *Bot) handleSearchCommand(s *discordgo.Session, i *discordgo.Interaction
 	ctx := context.Background()
 	query := searchQueryText(i.ApplicationCommandData().Options)
 
-	items, err := b.service.SearchCompleted(ctx, i.GuildID, query)
+	items, hasMore, err := b.service.SearchCompleted(ctx, i.GuildID, query)
 	if errors.Is(err, actionitems.ErrEmptyQuery) {
 		_ = respondEphemeral(s, i, "Please provide something to search for.")
 		return
@@ -239,7 +239,7 @@ func (b *Bot) handleSearchCommand(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	_ = respondEphemeral(s, i, searchResultsText(items))
+	_ = respondEphemeral(s, i, searchResultsText(items, hasMore))
 }
 
 func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

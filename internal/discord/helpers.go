@@ -107,15 +107,18 @@ func truncateDescription(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-func searchResultsText(items []actionitems.ActionItem) string {
+func searchResultsText(items []actionitems.ActionItem, hasMore bool) string {
 	if len(items) == 0 {
 		return "No completed action items matched that search."
 	}
 
 	lines := make([]string, 0, len(items)+1)
-	if len(items) == 1 {
+	switch {
+	case hasMore:
+		lines = append(lines, fmt.Sprintf("Showing the %d most recent matches (there may be more):", len(items)))
+	case len(items) == 1:
 		lines = append(lines, "Found 1 completed action item:")
-	} else {
+	default:
 		lines = append(lines, fmt.Sprintf("Found %d completed action items:", len(items)))
 	}
 	for _, item := range items {

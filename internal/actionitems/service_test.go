@@ -362,7 +362,7 @@ func TestSearchCompleted_MatchesSubstringCaseInsensitively(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.SearchCompleted(ctx, "guild1", tt.query)
+			got, _, err := s.SearchCompleted(ctx, "guild1", tt.query)
 			if err != nil {
 				t.Fatalf("SearchCompleted() error = %v", err)
 			}
@@ -386,7 +386,7 @@ func TestSearchCompleted_OnlyReturnsDoneItems(t *testing.T) {
 	done, _ := s.CreateItem(ctx, "guild1", "task gamma", "user1", now)
 	_ = s.CompleteItem(ctx, done.ID, "approver1", now)
 
-	got, err := s.SearchCompleted(ctx, "guild1", "task")
+	got, _, err := s.SearchCompleted(ctx, "guild1", "task")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v", err)
 	}
@@ -410,7 +410,7 @@ func TestSearchCompleted_ScopedToGuild(t *testing.T) {
 	theirs, _ := s.CreateItem(ctx, "guild2", "shared description", "user1", now)
 	_ = s.CompleteItem(ctx, theirs.ID, "approver1", now)
 
-	got, err := s.SearchCompleted(ctx, "guild1", "shared")
+	got, _, err := s.SearchCompleted(ctx, "guild1", "shared")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v", err)
 	}
@@ -430,7 +430,7 @@ func TestSearchCompleted_NoTimeWindow(t *testing.T) {
 	ancient, _ := s.CreateItem(ctx, "guild1", "very old task", "user1", now)
 	_ = s.CompleteItem(ctx, ancient.ID, "approver1", now.Add(-365*24*time.Hour))
 
-	got, err := s.SearchCompleted(ctx, "guild1", "old task")
+	got, _, err := s.SearchCompleted(ctx, "guild1", "old task")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v", err)
 	}
@@ -450,12 +450,15 @@ func TestSearchCompleted_CapsAtTenMostRecentFirst(t *testing.T) {
 		_ = s.CompleteItem(ctx, item.ID, "approver1", now.Add(time.Duration(n)*time.Minute))
 	}
 
-	got, err := s.SearchCompleted(ctx, "guild1", "task")
+	got, hasMore, err := s.SearchCompleted(ctx, "guild1", "task")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v", err)
 	}
 	if len(got) != 10 {
 		t.Fatalf("len(got) = %d, want 10", len(got))
+	}
+	if !hasMore {
+		t.Error("hasMore = false, want true (12 items exist, only 10 shown)")
 	}
 	for idx := 1; idx < len(got); idx++ {
 		if got[idx].CompletedAt.After(*got[idx-1].CompletedAt) {
@@ -467,12 +470,32 @@ func TestSearchCompleted_CapsAtTenMostRecentFirst(t *testing.T) {
 	}
 }
 
+func TestSearchCompleted_HasMoreFalseWhenResultsFitWithinLimit(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	item, _ := s.CreateItem(ctx, "guild1", "buy milk", "user1", now)
+	_ = s.CompleteItem(ctx, item.ID, "approver1", now)
+
+	got, hasMore, err := s.SearchCompleted(ctx, "guild1", "milk")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if hasMore {
+		t.Error("hasMore = true, want false (only 1 item exists)")
+	}
+}
+
 func TestSearchCompleted_RejectsBlankQuery(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 
 	for _, query := range []string{"", "   ", "\t\n"} {
-		_, err := s.SearchCompleted(ctx, "guild1", query)
+		_, _, err := s.SearchCompleted(ctx, "guild1", query)
 		if !errors.Is(err, ErrEmptyQuery) {
 			t.Errorf("SearchCompleted(%q) err = %v, want ErrEmptyQuery", query, err)
 		}
@@ -487,7 +510,7 @@ func TestSearchCompleted_TrimsSurroundingWhitespace(t *testing.T) {
 	item, _ := s.CreateItem(ctx, "guild1", "buy milk", "user1", now)
 	_ = s.CompleteItem(ctx, item.ID, "approver1", now)
 
-	got, err := s.SearchCompleted(ctx, "guild1", "  milk  ")
+	got, _, err := s.SearchCompleted(ctx, "guild1", "  milk  ")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v", err)
 	}
@@ -500,7 +523,7 @@ func TestSearchCompleted_NoMatchesReturnsEmptyNotError(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 
-	got, err := s.SearchCompleted(ctx, "guild1", "nothing here")
+	got, _, err := s.SearchCompleted(ctx, "guild1", "nothing here")
 	if err != nil {
 		t.Fatalf("SearchCompleted() error = %v, want nil", err)
 	}

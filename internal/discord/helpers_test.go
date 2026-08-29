@@ -178,7 +178,7 @@ func TestTruncateDescription(t *testing.T) {
 }
 
 func TestSearchResultsText_NoResults(t *testing.T) {
-	got := searchResultsText(nil)
+	got := searchResultsText(nil, false)
 	want := "No completed action items matched that search."
 	if got != want {
 		t.Errorf("searchResultsText(nil) = %q, want %q", got, want)
@@ -191,7 +191,7 @@ func TestSearchResultsText_SingleResultUsesSingularHeader(t *testing.T) {
 		{ID: "id1", Description: "buy milk", CompletedAt: &completedAt},
 	}
 
-	got := searchResultsText(items)
+	got := searchResultsText(items, false)
 
 	if !strings.HasPrefix(got, "Found 1 completed action item:") {
 		t.Errorf("searchResultsText() header = %q, want singular header", got)
@@ -212,7 +212,7 @@ func TestSearchResultsText_MultipleResultsListedInOrder(t *testing.T) {
 		{ID: "id2", Description: "older task", CompletedAt: &older},
 	}
 
-	got := searchResultsText(items)
+	got := searchResultsText(items, false)
 
 	if !strings.HasPrefix(got, "Found 2 completed action items:") {
 		t.Errorf("searchResultsText() header = %q, want plural header", got)
@@ -236,7 +236,7 @@ func TestSearchResultsText_TruncatesLongDescriptions(t *testing.T) {
 		{ID: "id1", Description: strings.Repeat("a", 150), CompletedAt: &completedAt},
 	}
 
-	got := searchResultsText(items)
+	got := searchResultsText(items, false)
 
 	if strings.Contains(got, strings.Repeat("a", 101)) {
 		t.Errorf("searchResultsText() did not truncate a long description:\n%s", got)
@@ -251,7 +251,7 @@ func TestSearchResultsText_HandlesMissingCompletedAt(t *testing.T) {
 		{ID: "id1", Description: "buy milk"},
 	}
 
-	got := searchResultsText(items)
+	got := searchResultsText(items, false)
 
 	if !strings.Contains(got, "- buy milk") {
 		t.Errorf("searchResultsText() missing description in:\n%s", got)
@@ -269,10 +269,23 @@ func TestSearchResultsText_FitsDiscordMessageLimit(t *testing.T) {
 		items = append(items, item)
 	}
 
-	got := searchResultsText(items)
+	got := searchResultsText(items, false)
 
 	if len(got) > 2000 {
 		t.Errorf("len(searchResultsText()) = %d, want <= 2000 (Discord message limit)", len(got))
+	}
+}
+
+func TestSearchResultsText_HasMoreUsesShowingHeader(t *testing.T) {
+	completedAt := time.Now()
+	items := []actionitems.ActionItem{
+		{ID: "id1", Description: "buy milk", CompletedAt: &completedAt},
+	}
+
+	got := searchResultsText(items, true)
+
+	if !strings.HasPrefix(got, "Showing the 1 most recent matches (there may be more):") {
+		t.Errorf("searchResultsText() header = %q, want the hasMore header", got)
 	}
 }
 
