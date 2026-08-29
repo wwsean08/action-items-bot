@@ -10,6 +10,11 @@ import (
 	"github.com/wwsean08/action-items-bot/internal/actionitems"
 )
 
+// maxDisplayedDescription bounds how much of a description is echoed back in
+// select-menu labels and search results, keeping responses well under
+// Discord's 2000-character message limit.
+const maxDisplayedDescription = 100
+
 func actionItemText(options []*discordgo.ApplicationCommandInteractionDataOption) string {
 	for _, opt := range options {
 		if opt.Name == "text" {
@@ -19,15 +24,20 @@ func actionItemText(options []*discordgo.ApplicationCommandInteractionDataOption
 	return ""
 }
 
+func searchQueryText(options []*discordgo.ApplicationCommandInteractionDataOption) string {
+	for _, opt := range options {
+		if opt.Name == "query" {
+			return opt.StringValue()
+		}
+	}
+	return ""
+}
+
 func undoSelectOptions(items []actionitems.ActionItem) []discordgo.SelectMenuOption {
 	options := make([]discordgo.SelectMenuOption, 0, len(items))
 	for _, item := range items {
-		label := item.Description
-		if len(label) > 100 {
-			label = label[:97] + "..."
-		}
 		options = append(options, discordgo.SelectMenuOption{
-			Label:       label,
+			Label:       truncateDescription(item.Description, maxDisplayedDescription),
 			Value:       item.ID,
 			Description: fmt.Sprintf("completed %s", item.CompletedAt.Format(time.RFC822)),
 		})
@@ -86,6 +96,35 @@ func approverListText(approvers []string) string {
 	lines = append(lines, "Approvers:")
 	for _, id := range approvers {
 		lines = append(lines, fmt.Sprintf("- <@%s>", id))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func truncateDescription(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+func searchResultsText(items []actionitems.ActionItem) string {
+	if len(items) == 0 {
+		return "No completed action items matched that search."
+	}
+
+	lines := make([]string, 0, len(items)+1)
+	if len(items) == 1 {
+		lines = append(lines, "Found 1 completed action item:")
+	} else {
+		lines = append(lines, fmt.Sprintf("Found %d completed action items:", len(items)))
+	}
+	for _, item := range items {
+		description := truncateDescription(item.Description, maxDisplayedDescription)
+		if item.CompletedAt == nil {
+			lines = append(lines, fmt.Sprintf("- %s", description))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s (completed %s)", description, item.CompletedAt.Format(time.RFC822)))
 	}
 	return strings.Join(lines, "\n")
 }

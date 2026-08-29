@@ -31,6 +31,7 @@ func helpMessageBody(cfg actionitems.GuildConfig, ownerID string, approvers []st
 	b.WriteString("\n\n")
 
 	b.WriteString("**Undo**: if an item was completed by mistake, run `/undo` within 24 hours (last 5 completions) to restore it.\n\n")
+	b.WriteString("**Searching**: run `/search query:\"...\"` to look through completed items — results are shown only to you.\n\n")
 	b.WriteString("**Configuration**: run `/config` to change the channel, emotes, or approver role. Manage individual approvers with `/approver add`, `/approver remove`, and `/approver list`.")
 
 	return b.String()

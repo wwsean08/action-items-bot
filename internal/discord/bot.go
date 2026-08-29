@@ -66,6 +66,19 @@ func (b *Bot) RegisterCommands() error {
 			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 		{
+			Name:        "search",
+			Description: "Search completed action items",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "query",
+					Description: "Text to look for in completed action items",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "approver",
 			Description: "Manage who can transition and undo action items",
 			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},

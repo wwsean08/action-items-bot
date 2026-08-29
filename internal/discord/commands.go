@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -21,6 +22,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleActionItemCommand(s, i)
 		case "undo":
 			b.handleUndoCommand(s, i)
+		case "search":
+			b.handleSearchCommand(s, i)
 		case "approver":
 			b.handleApproverCommand(s, i)
 		case "config":
@@ -215,6 +218,28 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 	if err != nil {
 		log.Printf("confirming undo: %v", err)
 	}
+}
+
+// handleSearchCommand answers with the guild's matching completed action
+// items. Unlike /undo, /approver and /config it performs no approver check —
+// access is governed by each guild's Discord Integrations settings, the same
+// as /action-item.
+func (b *Bot) handleSearchCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	query := searchQueryText(i.ApplicationCommandData().Options)
+
+	items, err := b.service.SearchCompleted(ctx, i.GuildID, query)
+	if errors.Is(err, actionitems.ErrEmptyQuery) {
+		_ = respondEphemeral(s, i, "Please provide something to search for.")
+		return
+	}
+	if err != nil {
+		log.Printf("searching completed action items: %v", err)
+		_ = respondEphemeral(s, i, "Failed to search completed action items.")
+		return
+	}
+
+	_ = respondEphemeral(s, i, searchResultsText(items))
 }
 
 func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

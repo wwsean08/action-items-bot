@@ -15,7 +15,7 @@ func TestHelpMessageBody_ContainsEmotesAndWhoCanAct(t *testing.T) {
 	}
 	body := helpMessageBody(cfg, "owner1", []string{"user1", "user2"})
 
-	for _, want := range []string{"🔄", "✅", "<@owner1>", "<@&role1>", "<@user1>", "<@user2>", "/action-item", "/undo", "/config", "/approver"} {
+	for _, want := range []string{"🔄", "✅", "<@owner1>", "<@&role1>", "<@user1>", "<@user2>", "/action-item", "/undo", "/search", "/config", "/approver"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("helpMessageBody() missing %q in:\n%s", want, body)
 		}

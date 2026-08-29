@@ -130,6 +130,152 @@ func TestApproverListText_WithApprovers(t *testing.T) {
 	}
 }
 
+func TestSearchQueryText_ReturnsQueryOptionValue(t *testing.T) {
+	options := []*discordgo.ApplicationCommandInteractionDataOption{
+		{Name: "query", Type: discordgo.ApplicationCommandOptionString, Value: "oat milk"},
+	}
+
+	got := searchQueryText(options)
+
+	if got != "oat milk" {
+		t.Errorf("searchQueryText = %q, want %q", got, "oat milk")
+	}
+}
+
+func TestSearchQueryText_ReturnsEmptyWhenMissing(t *testing.T) {
+	if got := searchQueryText(nil); got != "" {
+		t.Errorf("searchQueryText(nil) = %q, want empty", got)
+	}
+
+	options := []*discordgo.ApplicationCommandInteractionDataOption{
+		{Name: "text", Type: discordgo.ApplicationCommandOptionString, Value: "wrong option"},
+	}
+	if got := searchQueryText(options); got != "" {
+		t.Errorf("searchQueryText(text option) = %q, want empty", got)
+	}
+}
+
+func TestTruncateDescription(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		max   int
+		want  string
+	}{
+		{name: "shorter than max is unchanged", input: "buy milk", max: 100, want: "buy milk"},
+		{name: "exactly max is unchanged", input: strings.Repeat("a", 100), max: 100, want: strings.Repeat("a", 100)},
+		{name: "longer is truncated with ellipsis", input: strings.Repeat("a", 150), max: 100, want: strings.Repeat("a", 97) + "..."},
+		{name: "empty stays empty", input: "", max: 100, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := truncateDescription(tt.input, tt.max); got != tt.want {
+				t.Errorf("truncateDescription() = %q (len %d), want %q (len %d)", got, len(got), tt.want, len(tt.want))
+			}
+		})
+	}
+}
+
+func TestSearchResultsText_NoResults(t *testing.T) {
+	got := searchResultsText(nil)
+	want := "No completed action items matched that search."
+	if got != want {
+		t.Errorf("searchResultsText(nil) = %q, want %q", got, want)
+	}
+}
+
+func TestSearchResultsText_SingleResultUsesSingularHeader(t *testing.T) {
+	completedAt := time.Date(2026, 1, 2, 15, 4, 0, 0, time.UTC)
+	items := []actionitems.ActionItem{
+		{ID: "id1", Description: "buy milk", CompletedAt: &completedAt},
+	}
+
+	got := searchResultsText(items)
+
+	if !strings.HasPrefix(got, "Found 1 completed action item:") {
+		t.Errorf("searchResultsText() header = %q, want singular header", got)
+	}
+	if !strings.Contains(got, "- buy milk") {
+		t.Errorf("searchResultsText() missing the description in:\n%s", got)
+	}
+	if !strings.Contains(got, completedAt.Format(time.RFC822)) {
+		t.Errorf("searchResultsText() missing the completion time in:\n%s", got)
+	}
+}
+
+func TestSearchResultsText_MultipleResultsListedInOrder(t *testing.T) {
+	newer := time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC)
+	items := []actionitems.ActionItem{
+		{ID: "id1", Description: "newer task", CompletedAt: &newer},
+		{ID: "id2", Description: "older task", CompletedAt: &older},
+	}
+
+	got := searchResultsText(items)
+
+	if !strings.HasPrefix(got, "Found 2 completed action items:") {
+		t.Errorf("searchResultsText() header = %q, want plural header", got)
+	}
+	newerIdx := strings.Index(got, "newer task")
+	olderIdx := strings.Index(got, "older task")
+	if newerIdx < 0 || olderIdx < 0 {
+		t.Fatalf("searchResultsText() missing a description in:\n%s", got)
+	}
+	if newerIdx > olderIdx {
+		t.Errorf("searchResultsText() reordered results; want input order preserved:\n%s", got)
+	}
+	if lines := strings.Split(got, "\n"); len(lines) != 3 {
+		t.Errorf("len(lines) = %d, want 3 (header + 2 results)", len(lines))
+	}
+}
+
+func TestSearchResultsText_TruncatesLongDescriptions(t *testing.T) {
+	completedAt := time.Now()
+	items := []actionitems.ActionItem{
+		{ID: "id1", Description: strings.Repeat("a", 150), CompletedAt: &completedAt},
+	}
+
+	got := searchResultsText(items)
+
+	if strings.Contains(got, strings.Repeat("a", 101)) {
+		t.Errorf("searchResultsText() did not truncate a long description:\n%s", got)
+	}
+	if !strings.Contains(got, strings.Repeat("a", 97)+"...") {
+		t.Errorf("searchResultsText() missing truncated description with ellipsis:\n%s", got)
+	}
+}
+
+func TestSearchResultsText_HandlesMissingCompletedAt(t *testing.T) {
+	items := []actionitems.ActionItem{
+		{ID: "id1", Description: "buy milk"},
+	}
+
+	got := searchResultsText(items)
+
+	if !strings.Contains(got, "- buy milk") {
+		t.Errorf("searchResultsText() missing description in:\n%s", got)
+	}
+	if strings.Contains(got, "(completed") {
+		t.Errorf("searchResultsText() should omit the completion time when it is unknown:\n%s", got)
+	}
+}
+
+func TestSearchResultsText_FitsDiscordMessageLimit(t *testing.T) {
+	completedAt := time.Now()
+	items := make([]actionitems.ActionItem, 0, 10)
+	for n := 0; n < 10; n++ {
+		item := actionitems.ActionItem{ID: "id", Description: strings.Repeat("z", 400), CompletedAt: &completedAt}
+		items = append(items, item)
+	}
+
+	got := searchResultsText(items)
+
+	if len(got) > 2000 {
+		t.Errorf("len(searchResultsText()) = %d, want <= 2000 (Discord message limit)", len(got))
+	}
+}
+
 func TestModalEmoteValues(t *testing.T) {
 	components := []discordgo.MessageComponent{
 		&discordgo.ActionsRow{
