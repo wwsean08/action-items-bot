@@ -9,6 +9,9 @@ import (
 // Implementations must return ErrNotFound when an ActionItem lookup finds no
 // matching row. GetGuildConfig must never return ErrNotFound — an
 // unconfigured guild gets a zero-value config with default emotes filled in.
+// SearchCompleted matches query as a case-insensitive substring of the
+// description across all done items in the guild, newest completion first,
+// treating every character in query — including LIKE wildcards — literally.
 type Repository interface {
 	Create(ctx context.Context, item ActionItem) (ActionItem, error)
 	Get(ctx context.Context, id string) (ActionItem, error)
@@ -17,6 +20,7 @@ type Repository interface {
 	SetStatus(ctx context.Context, id string, status Status) error
 	Complete(ctx context.Context, id, completedByUserID string, completedAt time.Time, previousStatus Status) error
 	ListCompletedSince(ctx context.Context, guildID string, since time.Time, limit int) ([]ActionItem, error)
+	SearchCompleted(ctx context.Context, guildID, query string, limit int) ([]ActionItem, error)
 	Reopen(ctx context.Context, id, newMessageID string, restoreStatus Status) error
 
 	GetGuildConfig(ctx context.Context, guildID string) (GuildConfig, error)

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -158,6 +159,54 @@ func (r *Repository) ListCompletedSince(ctx context.Context, guildID string, sin
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing completed action items: %w", err)
+	}
+	defer rows.Close()
+
+	var result []actionitems.ActionItem
+	for rows.Next() {
+		item, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating completed action items: %w", err)
+	}
+	return result, nil
+}
+
+// likeEscapeChar is the escape character used with the ESCAPE clause in
+// SearchCompleted. It must stay in sync with that query's ESCAPE '\'.
+const likeEscapeChar = '\\'
+
+// escapeLikePattern escapes the ILIKE metacharacters '%' and '_', plus the
+// escape character itself, so user-supplied search text matches literally.
+// This is a correctness measure only — injection is prevented by passing the
+// pattern as a bind parameter, never by string concatenation.
+func escapeLikePattern(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '%' || r == '_' || r == likeEscapeChar {
+			b.WriteRune(likeEscapeChar)
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func (r *Repository) SearchCompleted(ctx context.Context, guildID, query string, limit int) ([]actionitems.ActionItem, error) {
+	pattern := "%" + escapeLikePattern(query) + "%"
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+selectColumns+` FROM action_items
+		WHERE guild_id = $1 AND status = $2 AND description ILIKE $3 ESCAPE '\'
+		ORDER BY completed_at DESC
+		LIMIT $4`,
+		guildID, string(actionitems.StatusDone), pattern, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("searching completed action items: %w", err)
 	}
 	defer rows.Close()
 

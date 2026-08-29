@@ -339,3 +339,172 @@ func TestIsApprover_MatchesOwnerRoleOrUser(t *testing.T) {
 		t.Errorf("IsApprover(user3) = %v, %v, want false, nil", ok, err)
 	}
 }
+
+func TestSearchCompleted_MatchesSubstringCaseInsensitively(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	item, _ := s.CreateItem(ctx, "guild1", "Buy Oat Milk", "user1", now)
+	_ = s.CompleteItem(ctx, item.ID, "approver1", now)
+
+	tests := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{name: "exact case", query: "Oat Milk", want: 1},
+		{name: "lowercase query", query: "oat milk", want: 1},
+		{name: "uppercase query", query: "OAT MILK", want: 1},
+		{name: "interior substring", query: "at mi", want: 1},
+		{name: "no match", query: "coffee", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.SearchCompleted(ctx, "guild1", tt.query)
+			if err != nil {
+				t.Fatalf("SearchCompleted() error = %v", err)
+			}
+			if len(got) != tt.want {
+				t.Errorf("len(got) = %d, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchCompleted_OnlyReturnsDoneItems(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	newItem, _ := s.CreateItem(ctx, "guild1", "task alpha", "user1", now)
+
+	inProgress, _ := s.CreateItem(ctx, "guild1", "task beta", "user1", now)
+	_ = s.MarkInProgress(ctx, inProgress.ID)
+
+	done, _ := s.CreateItem(ctx, "guild1", "task gamma", "user1", now)
+	_ = s.CompleteItem(ctx, done.ID, "approver1", now)
+
+	got, err := s.SearchCompleted(ctx, "guild1", "task")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].ID != done.ID {
+		t.Errorf("got[0].ID = %q, want %q (the done item)", got[0].ID, done.ID)
+	}
+	_ = newItem
+}
+
+func TestSearchCompleted_ScopedToGuild(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	mine, _ := s.CreateItem(ctx, "guild1", "shared description", "user1", now)
+	_ = s.CompleteItem(ctx, mine.ID, "approver1", now)
+
+	theirs, _ := s.CreateItem(ctx, "guild2", "shared description", "user1", now)
+	_ = s.CompleteItem(ctx, theirs.ID, "approver1", now)
+
+	got, err := s.SearchCompleted(ctx, "guild1", "shared")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].ID != mine.ID {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, mine.ID)
+	}
+}
+
+func TestSearchCompleted_NoTimeWindow(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	ancient, _ := s.CreateItem(ctx, "guild1", "very old task", "user1", now)
+	_ = s.CompleteItem(ctx, ancient.ID, "approver1", now.Add(-365*24*time.Hour))
+
+	got, err := s.SearchCompleted(ctx, "guild1", "old task")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (search has no time cutoff)", len(got))
+	}
+}
+
+func TestSearchCompleted_CapsAtTenMostRecentFirst(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	for n := 0; n < 12; n++ {
+		item, _ := s.CreateItem(ctx, "guild1", "task", "user1", now)
+		// n == 11 is the most recently completed.
+		_ = s.CompleteItem(ctx, item.ID, "approver1", now.Add(time.Duration(n)*time.Minute))
+	}
+
+	got, err := s.SearchCompleted(ctx, "guild1", "task")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 10 {
+		t.Fatalf("len(got) = %d, want 10", len(got))
+	}
+	for idx := 1; idx < len(got); idx++ {
+		if got[idx].CompletedAt.After(*got[idx-1].CompletedAt) {
+			t.Fatalf("results not ordered most-recently-completed first at index %d", idx)
+		}
+	}
+	if !got[0].CompletedAt.Equal(now.Add(11 * time.Minute)) {
+		t.Errorf("got[0].CompletedAt = %v, want the newest completion %v", got[0].CompletedAt, now.Add(11*time.Minute))
+	}
+}
+
+func TestSearchCompleted_RejectsBlankQuery(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	for _, query := range []string{"", "   ", "\t\n"} {
+		_, err := s.SearchCompleted(ctx, "guild1", query)
+		if !errors.Is(err, ErrEmptyQuery) {
+			t.Errorf("SearchCompleted(%q) err = %v, want ErrEmptyQuery", query, err)
+		}
+	}
+}
+
+func TestSearchCompleted_TrimsSurroundingWhitespace(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	now := time.Now()
+
+	item, _ := s.CreateItem(ctx, "guild1", "buy milk", "user1", now)
+	_ = s.CompleteItem(ctx, item.ID, "approver1", now)
+
+	got, err := s.SearchCompleted(ctx, "guild1", "  milk  ")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+}
+
+func TestSearchCompleted_NoMatchesReturnsEmptyNotError(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+
+	got, err := s.SearchCompleted(ctx, "guild1", "nothing here")
+	if err != nil {
+		t.Fatalf("SearchCompleted() error = %v, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}

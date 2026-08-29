@@ -3,18 +3,21 @@ package actionitems
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
 const (
-	undoWindow = 24 * time.Hour
-	undoLimit  = 5
+	undoWindow  = 24 * time.Hour
+	undoLimit   = 5
+	searchLimit = 10
 )
 
 var (
 	ErrNotUndoable       = errors.New("action item is not eligible for undo")
 	ErrInvalidTransition = errors.New("action item is not in a state that allows this transition")
 	ErrInvalidEmote      = errors.New("emote must not be empty")
+	ErrEmptyQuery        = errors.New("search query must not be empty")
 )
 
 type Service struct {
@@ -89,6 +92,18 @@ func (s *Service) CompleteItem(ctx context.Context, id, completedByUserID string
 
 func (s *Service) ListUndoable(ctx context.Context, guildID string, now time.Time) ([]ActionItem, error) {
 	return s.repo.ListCompletedSince(ctx, guildID, now.Add(-undoWindow), undoLimit)
+}
+
+// SearchCompleted returns up to searchLimit done action items in the guild
+// whose description contains query (case-insensitive), most recently
+// completed first. Unlike ListUndoable it searches the full history with no
+// time cutoff.
+func (s *Service) SearchCompleted(ctx context.Context, guildID, query string) ([]ActionItem, error) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil, ErrEmptyQuery
+	}
+	return s.repo.SearchCompleted(ctx, guildID, trimmed, searchLimit)
 }
 
 func (s *Service) UndoItem(ctx context.Context, id, newMessageID string, now time.Time) error {

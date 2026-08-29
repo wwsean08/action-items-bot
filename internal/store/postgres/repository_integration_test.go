@@ -405,3 +405,214 @@ func TestRepository_ListCompletedSince_ScopedToGuild(t *testing.T) {
 		t.Errorf("got[0].ID = %q, want %q", got[0].ID, inGuild.ID)
 	}
 }
+
+func TestRepository_SearchCompleted_MatchesSubstringCaseInsensitivelyDoneOnly(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestRepository(t)
+	now := time.Now().UTC()
+
+	done, _ := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild1", Description: "Buy Oat Milk", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	})
+	if err := repo.Complete(ctx, done.ID, "approver1", now, actionitems.StatusNew); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Same words, but never completed — must not appear.
+	if _, err := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild1", Description: "buy oat milk again", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := repo.SearchCompleted(ctx, "guild1", "OAT MILK", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].ID != done.ID {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, done.ID)
+	}
+
+	none, err := repo.SearchCompleted(ctx, "guild1", "coffee", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("len(none) = %d, want 0", len(none))
+	}
+}
+
+func TestRepository_SearchCompleted_ScopedToGuild(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestRepository(t)
+	now := time.Now().UTC()
+
+	mine, _ := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild1", Description: "shared description", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	})
+	_ = repo.Complete(ctx, mine.ID, "approver1", now, actionitems.StatusNew)
+
+	theirs, _ := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild2", Description: "shared description", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	})
+	_ = repo.Complete(ctx, theirs.ID, "approver1", now, actionitems.StatusNew)
+
+	got, err := repo.SearchCompleted(ctx, "guild1", "shared", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].ID != mine.ID {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, mine.ID)
+	}
+}
+
+func TestRepository_SearchCompleted_NewestFirstAndRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestRepository(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	var newestID string
+	for n := 0; n < 12; n++ {
+		item, err := repo.Create(ctx, actionitems.ActionItem{
+			GuildID: "guild1", Description: "task", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := repo.Complete(ctx, item.ID, "approver1", now.Add(time.Duration(n)*time.Minute), actionitems.StatusNew); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		newestID = item.ID
+	}
+
+	got, err := repo.SearchCompleted(ctx, "guild1", "task", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 10 {
+		t.Fatalf("len(got) = %d, want 10", len(got))
+	}
+	if got[0].ID != newestID {
+		t.Errorf("got[0].ID = %q, want the most recently completed item %q", got[0].ID, newestID)
+	}
+	for idx := 1; idx < len(got); idx++ {
+		if got[idx].CompletedAt.After(*got[idx-1].CompletedAt) {
+			t.Fatalf("results not ordered newest-first at index %d", idx)
+		}
+	}
+}
+
+func TestRepository_SearchCompleted_TreatsLikeWildcardsAsLiterals(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestRepository(t)
+	now := time.Now().UTC()
+
+	create := func(description string) string {
+		t.Helper()
+		item, err := repo.Create(ctx, actionitems.ActionItem{
+			GuildID: "guild1", Description: description, CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+		})
+		if err != nil {
+			t.Fatalf("Create(%q): %v", description, err)
+		}
+		if err := repo.Complete(ctx, item.ID, "approver1", now, actionitems.StatusNew); err != nil {
+			t.Fatalf("Complete(%q): %v", description, err)
+		}
+		return item.ID
+	}
+
+	percentID := create("50% off coupon")
+	create("50 off coupon")
+	underscoreID := create("snake_case name")
+	create("snakeXcase name")
+
+	// "%" must not act as a wildcard: "50%" matches only the literal "50% ...".
+	got, err := repo.SearchCompleted(ctx, "guild1", "50%", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != percentID {
+		t.Fatalf("searching \"50%%\" returned %d results, want only the literal-percent item", len(got))
+	}
+
+	// "_" must not act as a single-character wildcard.
+	got, err = repo.SearchCompleted(ctx, "guild1", "snake_case", 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != underscoreID {
+		t.Fatalf("searching \"snake_case\" returned %d results, want only the literal-underscore item", len(got))
+	}
+
+	// A lone backslash must not produce a malformed pattern error.
+	if _, err := repo.SearchCompleted(ctx, "guild1", `\`, 10); err != nil {
+		t.Fatalf("SearchCompleted with a lone backslash: %v", err)
+	}
+}
+
+func TestRepository_SearchCompleted_TreatsSQLInjectionAttemptAsInertText(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestRepository(t)
+	now := time.Now().UTC()
+
+	const injection = `'; DROP TABLE action_items; --`
+
+	existing, err := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild1", Description: "buy milk", CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.Complete(ctx, existing.ID, "approver1", now, actionitems.StatusNew); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	got, err := repo.SearchCompleted(ctx, "guild1", injection, 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted with injection text: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0 — injection text should match no descriptions", len(got))
+	}
+
+	// The table must still exist, still be queryable, and still hold its row.
+	if _, err := repo.Get(ctx, existing.ID); err != nil {
+		t.Fatalf("Get after injection attempt: %v (action_items may have been dropped)", err)
+	}
+	var count int
+	if err := repo.pool.QueryRow(ctx, `SELECT count(*) FROM action_items`).Scan(&count); err != nil {
+		t.Fatalf("counting action_items after injection attempt: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want 1", count)
+	}
+
+	// And the same text, stored as a description, is findable — proving the
+	// query text is treated as ordinary search text end to end.
+	stored, err := repo.Create(ctx, actionitems.ActionItem{
+		GuildID: "guild1", Description: injection, CreatedByUserID: "user1", CreatedAt: now, Status: actionitems.StatusNew,
+	})
+	if err != nil {
+		t.Fatalf("Create with injection text as description: %v", err)
+	}
+	if err := repo.Complete(ctx, stored.ID, "approver1", now.Add(time.Minute), actionitems.StatusNew); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	got, err = repo.SearchCompleted(ctx, "guild1", injection, 10)
+	if err != nil {
+		t.Fatalf("SearchCompleted: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != stored.ID {
+		t.Fatalf("len(got) = %d, want exactly the item whose description is the literal injection string", len(got))
+	}
+	if _, err := repo.Get(ctx, existing.ID); err != nil {
+		t.Fatalf("Get after second injection attempt: %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -87,6 +88,27 @@ func (f *fakeRepository) ListCompletedSince(_ context.Context, guildID string, s
 		if item.GuildID == guildID && item.Status == StatusDone && item.CompletedAt != nil && !item.CompletedAt.Before(since) {
 			result = append(result, item)
 		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CompletedAt.After(*result[j].CompletedAt)
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (f *fakeRepository) SearchCompleted(_ context.Context, guildID, query string, limit int) ([]ActionItem, error) {
+	needle := strings.ToLower(query)
+	var result []ActionItem
+	for _, item := range f.items {
+		if item.GuildID != guildID || item.Status != StatusDone || item.CompletedAt == nil {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(item.Description), needle) {
+			continue
+		}
+		result = append(result, item)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CompletedAt.After(*result[j].CompletedAt)
