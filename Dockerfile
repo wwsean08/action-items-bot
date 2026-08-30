@@ -1,11 +1,11 @@
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/bot ./cmd/bot
 
-FROM alpine:3.20
+FROM cgr.dev/chainguard/static:latest
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/bot /usr/local/bin/bot
 ENTRYPOINT ["/usr/local/bin/bot"]

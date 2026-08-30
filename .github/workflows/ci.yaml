@@ -1,0 +1,151 @@
+# CI/CD pipeline for monitor-actions
+#
+# CI  — triggered on every push and pull request
+# CD  — builds + pushes a multi-arch Docker image to GHCR on pushes to main
+#       or on semver tags (v*.*.*).  A separate release.yml handles the
+#       GitHub Release object so that the two concerns stay decoupled.
+
+name: CI/CD
+
+on:
+  push:
+    branches: ["main"]
+    tags:     ["v[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+    branches: ["main"]
+
+# Prevent redundant runs: cancel an in-progress run for the same ref when a
+# newer commit is pushed, but never cancel runs on main or release tags.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+# Minimal default permissions; each job grants only what it needs.
+permissions: {}
+
+env:
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/wwsean08/action-items-bot
+
+jobs:
+  # -----------------------------------------------------------------
+  # CI: lint, vet, test
+  # -----------------------------------------------------------------
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # Cache disabled: this job runs on pull_request (including from forks),
+          # so enabling the module cache would expose a cache-poisoning attack surface.
+          cache: false
+
+      - name: Download modules
+        run: go mod download
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: latest
+          # Only report new issues on PRs to keep noise low.
+          only-new-issues: ${{ github.event_name == 'pull_request' }}
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7
+
+  # -----------------------------------------------------------------
+  # CD: build + push multi-arch image
+  # Only runs when CI passes AND we are on main or a semver tag.
+  # -----------------------------------------------------------------
+  cd:
+    name: CD - Build and Push Image
+    needs: ci
+    runs-on: ubuntu-latest
+    # Skip on PRs entirely; only publish from trusted refs.
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: write   # required to push to GHCR with GITHUB_TOKEN
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # docker/metadata-action derives all tags and labels automatically:
+      #   - Short SHA tag  -> sha-<7-char>
+      #   - Semver tags    -> v1.2.3 / 1.2.3 / 1.2 / 1
+      #   - "latest"       -> applied on main branch pushes only
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=monitor-actions
+            org.opencontainers.image.description=Tool for managing action items
+            org.opencontainers.image.vendor=wwsean08
+            org.opencontainers.image.licenses=MIT
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags:   ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer cache stored in the GitHub Actions cache backend —
+          # no separate registry needed and it is free within quota.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          # Provenance/SBOM attestations require a public repo or a paid plan;
+          # re-enable these once the repository is made public.
+          provenance: false
+          sbom:       false

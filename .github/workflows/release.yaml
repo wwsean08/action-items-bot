@@ -1,0 +1,74 @@
+# Release workflow for monitor-actions
+#
+# Triggered exclusively when a semver tag (v*.*.*) is pushed.
+# Responsibilities:
+#   1. Build Go binaries for all target platforms
+#   2. Create a GitHub Release with those binaries attached
+#   3. Generate a changelog from commits since the previous tag
+#
+# The Docker image is built and pushed by ci.yml (the CD job there
+# also fires on semver tags), keeping image publishing and release
+# note creation in their natural homes.
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history lets the changelog generator walk all commits.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate changelog
+        # Use git log to get commit messages between the previous tag and
+        # the current one.  Falls back gracefully when there is no previous
+        # tag (first release).
+        # All values used here come from git commands, not user-controlled
+        # GitHub event payloads, so there is no injection risk.
+        run: |
+          set -euo pipefail
+
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            git log --pretty=format:"- %s (%h)" "${PREVIOUS_TAG}..${CURRENT_TAG}" > /tmp/changelog.txt
+          else
+            git log --pretty=format:"- %s (%h)" > /tmp/changelog.txt
+          fi
+
+          echo "Changelog:"
+          cat /tmp/changelog.txt
+
+      - name: Create GitHub Release
+        # Use the gh CLI (pre-installed on GitHub-hosted runners) instead of a
+        # third-party action — avoids an unnecessary external dependency.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read the tag name from the environment to avoid expression injection.
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          PRERELEASE_FLAG=""
+          if [[ "$TAG_NAME" == *"-"* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes-file /tmp/changelog.txt \
+            $PRERELEASE_FLAG
