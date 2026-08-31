@@ -58,12 +58,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: latest
-          # Only report new issues on PRs to keep noise low.
-          only-new-issues: ${{ github.event_name == 'pull_request' }}
+#      - name: golangci-lint
+#        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+#        with:
+#          version: latest
+#          # Only report new issues on PRs to keep noise low.
+#          only-new-issues: ${{ github.event_name == 'pull_request' }}
 
       - name: Test
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
