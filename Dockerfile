@@ -7,5 +7,5 @@ RUN CGO_ENABLED=0 go build -o /out/bot ./cmd/bot
 
 FROM cgr.dev/chainguard/static:latest
 RUN apk add --no-cache ca-certificates
-COPY --from=build /out/bot /usr/local/bin/bot
+COPY --from=builder /out/bot /usr/local/bin/bot
 ENTRYPOINT ["/usr/local/bin/bot"]
