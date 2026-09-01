@@ -18,7 +18,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
       -o /out/bot \
     ./cmd/bot
 
-RUN CGO_ENABLED=0 go build -o /out/bot ./cmd/bot
 FROM cgr.dev/chainguard/static:latest
 COPY --from=builder /out/bot /usr/local/bin/bot
 ENTRYPOINT ["/usr/local/bin/bot"]
