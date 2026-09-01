@@ -1,4 +1,8 @@
 FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION
+ARG COMMIT
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/root/.cache/go-build \
