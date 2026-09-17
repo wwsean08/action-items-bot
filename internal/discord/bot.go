@@ -13,9 +13,12 @@ const commandAckEmoji = "✅"
 type Bot struct {
 	Session *discordgo.Session
 	service *actionitems.Service
+	// botAdminIDs are Discord user IDs treated as the guild owner in every
+	// guild the bot is in, regardless of who actually owns that guild.
+	botAdminIDs map[string]struct{}
 }
 
-func New(token string, service *actionitems.Service) (*Bot, error) {
+func New(token string, service *actionitems.Service, botAdminIDs []string) (*Bot, error) {
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		return nil, fmt.Errorf("creating discord session: %w", err)
@@ -25,9 +28,15 @@ func New(token string, service *actionitems.Service) (*Bot, error) {
 		discordgo.IntentsGuildMessageReactions |
 		discordgo.IntentsGuildMembers
 
+	admins := make(map[string]struct{}, len(botAdminIDs))
+	for _, id := range botAdminIDs {
+		admins[id] = struct{}{}
+	}
+
 	b := &Bot{
-		Session: session,
-		service: service,
+		Session:     session,
+		service:     service,
+		botAdminIDs: admins,
 	}
 	session.AddHandler(b.handleInteraction)
 	session.AddHandler(b.handleReactionAdd)

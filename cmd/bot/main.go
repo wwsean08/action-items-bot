@@ -34,7 +34,7 @@ func main() {
 
 	service := actionitems.NewService(repo)
 
-	bot, err := discord.New(cfg.DiscordToken, service)
+	bot, err := discord.New(cfg.DiscordToken, service, cfg.BotAdminIDs)
 	if err != nil {
 		log.Fatalf("creating bot: %v", err)
 	}

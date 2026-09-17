@@ -75,3 +75,46 @@ func TestLoad_HealthPortOverride(t *testing.T) {
 		t.Errorf("HealthPort = %q, want %q", cfg.HealthPort, "9090")
 	}
 }
+
+func TestLoad_BotAdminIDsDefaultsToEmpty(t *testing.T) {
+	cfg, err := loadWithEnv(validEnv())
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if len(cfg.BotAdminIDs) != 0 {
+		t.Errorf("BotAdminIDs = %v, want empty", cfg.BotAdminIDs)
+	}
+}
+
+func TestLoad_BotAdminIDsParsesCommaSeparatedList(t *testing.T) {
+	env := validEnv()
+	env["BOT_ADMIN_IDS"] = "111, 222 ,333"
+
+	cfg, err := loadWithEnv(env)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	want := []string{"111", "222", "333"}
+	if len(cfg.BotAdminIDs) != len(want) {
+		t.Fatalf("BotAdminIDs = %v, want %v", cfg.BotAdminIDs, want)
+	}
+	for i, id := range want {
+		if cfg.BotAdminIDs[i] != id {
+			t.Errorf("BotAdminIDs[%d] = %q, want %q", i, cfg.BotAdminIDs[i], id)
+		}
+	}
+}
+
+func TestLoad_BotAdminIDsSkipsEmptyEntries(t *testing.T) {
+	env := validEnv()
+	env["BOT_ADMIN_IDS"] = "111,,  ,222"
+
+	cfg, err := loadWithEnv(env)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	want := []string{"111", "222"}
+	if len(cfg.BotAdminIDs) != len(want) {
+		t.Fatalf("BotAdminIDs = %v, want %v", cfg.BotAdminIDs, want)
+	}
+}

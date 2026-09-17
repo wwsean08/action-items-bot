@@ -8,11 +8,16 @@ import (
 )
 
 // isOwnerOrApprover reports whether member is allowed to manage this guild's
-// action items configuration or transition/undo items: either the guild
-// owner (checked live against the Discord API), or a configured approver.
+// action items configuration or transition/undo items: either a configured
+// bot admin (see Config.BotAdminIDs), the guild owner (checked live against
+// the Discord API), or a configured approver.
 func (b *Bot) isOwnerOrApprover(ctx context.Context, guildID string, member *discordgo.Member) (bool, error) {
 	if member == nil || member.User == nil {
 		return false, nil
+	}
+
+	if _, ok := b.botAdminIDs[member.User.ID]; ok {
+		return true, nil
 	}
 
 	guild, err := b.Session.State.Guild(guildID)
