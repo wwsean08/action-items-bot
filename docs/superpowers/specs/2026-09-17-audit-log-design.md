@@ -10,10 +10,14 @@ This is additive to the existing architecture (discord → actionitems service �
 
 - **Scope: allowed actions only, not denials.** `isOwnerOrApprover` is checked on every relevant status reaction, not just explicit commands, so logging every denial would record routine unauthorized-reaction noise (e.g. a non-approver reacting with the done emote) rather than meaningful admin activity. Only successful permission grants are recorded.
 - **Reason is recorded per entry**: `bot_admin`, `guild_owner`, or `approver` — one of the three paths `isOwnerOrApprover` already distinguishes internally. This is what makes bot-admin usage specifically traceable, separate from a guild's own owner or approvers acting normally.
-- **Single central logging point**: rather than duplicating audit-write calls at each of the 10 existing call sites that gate on `isOwnerOrApprover`/`requireOwnerOrApprover` (5 in `config_panel.go`, 3 in `commands.go`, 2 in `reactions.go`), the function itself records the entry on each allow path. Call sites only gain a new `action string` argument identifying what was being attempted (e.g. `"config.set_channel"`, `"approver.add"`, `"reaction.mark_done"`) — no new logic duplicated per site.
-- **Storage only for now, no viewer command.** Entries are queryable directly via Postgres (`psql`/DB tooling). A `/audit-log` command or similar can be added later if needed — YAGNI for this change.
+- **Username is snapshotted at write time.** IDs are the durable key, but a display name at time-of-action makes entries scannable without cross-referencing Discord. Since usernames change, this is stored as-was, not live-joined later.
+- **No IP address or client metadata.** Discord's Bot API doesn't expose the end user's IP or device/client info to bots for either interactions or reactions — that data only exists on Discord's own infrastructure. The nearest available thing, `Interaction.Locale`, only exists on slash-command/component/modal interactions (not reactions) and isn't worth the inconsistency for this change.
+- **No separate Discord-side event timestamp.** A Discord snowflake ID (e.g. `Interaction.ID`) encodes its own creation time, but `MessageReactionAdd`/`Remove` gateway events carry no timestamp at all, so this would only ever be populated for 8 of the 13 tracked actions. `created_at` (when the bot processed the action) is used uniformly instead; gateway/processing lag is normally sub-second.
+- **Before/after state, for mutating actions only.** Actions that change something (channel, role, emotes, approver membership, item status) record what changed; actions that only grant a look (opening the config panel, opening the emotes modal, `/approver list`, `/undo` listing) leave both null. Represented as nullable `jsonb` columns holding a flat `map[string]string`, since the shape differs by action (a single ID, a pair of emotes, a status value) but all reduce to string key/value pairs — no per-action-type schema needed, and it stays queryable with Postgres's jsonb operators.
+- **Permission check no longer writes the audit entry itself.** Capturing "after" state requires writing *after* the mutation succeeds, which happens later than the permission check. So `isOwnerOrApprover`/`requireOwnerOrApprover` are responsible only for *deciding* allow/deny and returning which of the three reasons applied; each call site writes its own entry (via a shared `recordAudit` helper that does the actual DB call and JSON marshaling) once it knows the action's before/after state, if any. This is a change from treating the permission check as the single write point, but keeps the one part that's genuinely common — the DB write, marshaling, and nil-safety — in one helper.
 - **New `internal/audit` package**, separate from `internal/actionitems`. An audit entry isn't action-item domain data — it's a record of a Discord-layer permission decision — so it gets its own small `Entry` type and `Repository` interface rather than growing the `actionitems.Repository` interface (interface segregation; the actionitems layer has no reason to know about audit entries).
 - **Same Postgres connection pool, no new repository struct.** The existing `postgres.Repository` (already wrapping the pool, already implementing `actionitems.Repository`) gains a `Record` method implementing `audit.Repository`, in a new file `internal/store/postgres/audit.go`. `main.go` passes the same `repo` value it already builds to both `actionitems.NewService` and the new `discord.New` parameter — no second pool, no second exported type.
+- **Storage only for now, no viewer command.** Entries are queryable directly via Postgres (`psql`/DB tooling). A `/audit-log` command or similar can be added later if needed — YAGNI for this change.
 
 ## Data model changes
 
@@ -25,8 +29,11 @@ New migration `0003_audit_log` (up/down):
 | id | bigserial (pk) | |
 | guild_id | text | |
 | user_id | text | the Discord user who took the action |
+| username | text | snapshot of their Discord username at write time |
 | action | text | short dotted identifier, e.g. `approver.add` |
 | reason | text | one of `bot_admin`, `guild_owner`, `approver` |
+| before_state | jsonb, nullable | flat string map; null for view-only actions |
+| after_state | jsonb, nullable | flat string map; null for view-only actions |
 | created_at | timestamptz | |
 
 Indexes on `guild_id` and `created_at` (typical query shapes: "recent activity in this guild", "recent activity overall").
@@ -47,8 +54,11 @@ const (
 type Entry struct {
     GuildID   string
     UserID    string
+    Username  string
     Action    string
     Reason    Reason
+    Before    map[string]string // nil when the action has no meaningful before state
+    After     map[string]string // nil when the action has no meaningful after state
     CreatedAt time.Time
 }
 
@@ -67,17 +77,56 @@ No `Service` layer — there's no business logic beyond persisting the entry, so
 
 ## Permission check changes
 
-`isOwnerOrApprover(ctx, guildID, action string, member)` and `requireOwnerOrApprover(ctx, s, i, action, denyMsg)` both gain the `action` parameter, threaded through from each of the 10 call sites using short constants defined in `internal/discord/permissions.go`:
+`isOwnerOrApprover(ctx, guildID, member) (allowed bool, reason audit.Reason, err error)` gains a return value (the matched reason; zero value when denied or on error) but no new parameters — it stays purely about the allow/deny decision. `requireOwnerOrApprover` passes the reason back out the same way, alongside its existing bool.
 
-- `config.open`, `config.set_channel`, `config.set_role`, `config.edit_emotes_button`, `config.save_emotes`
-- `approver.add`, `approver.remove`, `approver.list`
-- `undo.list`, `undo.select`
-- `reaction.mark_in_progress`, `reaction.mark_done`, `reaction.mark_new`
+A shared helper does the actual write:
 
-On each of the three allow paths (bot admin short-circuit, guild-owner match, approver match), `isOwnerOrApprover` calls a small `recordAudit` helper with the corresponding `Reason` before returning `true`. A failure to write the audit entry is logged (via the existing `log.Printf` pattern) but does not block the action — audit logging is best-effort observability, not a gate. If `auditLog` is nil (e.g. in unit tests that construct a `Bot` directly), `recordAudit` is a no-op.
+```go
+func (b *Bot) recordAudit(ctx context.Context, guildID string, member *discordgo.Member, action string, reason audit.Reason, before, after map[string]string) {
+    if b.auditLog == nil {
+        return
+    }
+    err := b.auditLog.Record(ctx, audit.Entry{
+        GuildID:   guildID,
+        UserID:    member.User.ID,
+        Username:  member.User.Username,
+        Action:    action,
+        Reason:    reason,
+        Before:    before,
+        After:     after,
+        CreatedAt: time.Now(),
+    })
+    if err != nil {
+        log.Printf("recording audit log entry: %v", err)
+    }
+}
+```
+
+A failure to write is logged but never blocks the action — audit logging is best-effort observability, not a gate. If `auditLog` is nil (e.g. unit tests constructing a `Bot` directly), `recordAudit` is a no-op.
+
+Each of the 10 permission-check call sites calls `recordAudit` once it knows the outcome, using one of 13 distinct action identifiers (a couple of call sites cover more than one action depending on which branch is taken — e.g. `handleApproverCommand` gates once but logs `approver.add`, `approver.remove`, or `approver.list` depending on the subcommand; `handleReactionAdd` gates once but logs `reaction.mark_in_progress` or `reaction.mark_done` depending on the target status):
+
+| action | site | before | after |
+|---|---|---|---|
+| `config.open` | `handleConfigCommand` | — | — |
+| `config.set_channel` | `handleConfigChannelSelect` | `{"channel_id": <old>}` | `{"channel_id": <new>}` |
+| `config.set_role` | `handleConfigRoleSelect` | `{"role_id": <old>}` | `{"role_id": <new>}` |
+| `config.edit_emotes_button` | `handleConfigEditEmotesButton` | — | — |
+| `config.save_emotes` | `handleConfigEmotesModalSubmit` | `{"in_progress_emote": <old>, "done_emote": <old>}` | `{"in_progress_emote": <new>, "done_emote": <new>}` |
+| `approver.add` | `handleApproverCommand` (add) | — | `{"user_id": <added>}` |
+| `approver.remove` | `handleApproverCommand` (remove) | `{"user_id": <removed>}` | — |
+| `approver.list` | `handleApproverCommand` (list) | — | — |
+| `undo.list` | `handleUndoCommand` | — | — |
+| `undo.select` | `handleUndoSelect` | `{"status": <item.Status>}` | `{"status": <restoreStatus>}` |
+| `reaction.mark_in_progress` | `handleReactionAdd` | `{"status": "new"}` | `{"status": "in_progress"}` |
+| `reaction.mark_done` | `handleReactionAdd` | `{"status": <item.Status>}` | `{"status": "done"}` |
+| `reaction.mark_new` | `handleReactionRemove` | `{"status": "in_progress"}` | `{"status": "new"}` |
+
+`config.set_channel` and `config.set_role` need one extra `GetGuildConfig` read before mutating (to capture the "before" value) where the handler doesn't already have it in hand; `config.save_emotes` already fetches the config after saving to refresh the panel, so only the pre-save fetch is new.
 
 ## Testing
 
-- `internal/discord/permissions_test.go`: extend the existing bot-admin test to assert a `bot_admin`-reason entry is recorded via a fake `audit.Repository`; add a guild-owner-path test seeding `discordgo.State.GuildAdd` (no network needed) and asserting a `guild_owner`-reason entry.
-- `internal/store/postgres`: an integration test (behind the existing `integration` build tag) verifying `Record` persists a row with the expected columns, following the pattern in `repository_integration_test.go`.
+- `internal/discord/permissions_test.go`: extend the existing bot-admin test to assert `isOwnerOrApprover` returns `ReasonBotAdmin`; add a guild-owner-path test seeding `discordgo.State.GuildAdd` (no network needed) asserting `ReasonGuildOwner`.
+- A `recordAudit` test using a fake `audit.Repository` asserting the entry's fields (including that `Before`/`After` come through nil when not passed, and populated when passed).
+- `internal/store/postgres`: an integration test (behind the existing `integration` build tag) verifying `Record` persists a row with the expected columns, including a round-trip of `before_state`/`after_state` JSON, following the pattern in `repository_integration_test.go`.
 - `cmd/bot/main.go` wiring has no test today (none of its other wiring does either) — unchanged in that respect.
