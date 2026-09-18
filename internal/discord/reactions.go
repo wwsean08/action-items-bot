@@ -61,8 +61,8 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 			return
 		}
 		b.recordAudit(ctx, r.GuildID, member, actionReactionMarkInProgress, reason,
-			map[string]string{"status": string(actionitems.StatusNew)},
-			map[string]string{"status": string(actionitems.StatusInProgress)},
+			map[string]string{"item_id": item.ID, "status": string(actionitems.StatusNew)},
+			map[string]string{"item_id": item.ID, "status": string(actionitems.StatusInProgress)},
 		)
 		content := prefixForStatus(actionitems.StatusInProgress) + item.Description
 		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
@@ -80,8 +80,8 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 			return
 		}
 		b.recordAudit(ctx, r.GuildID, member, actionReactionMarkDone, reason,
-			map[string]string{"status": string(previousStatus)},
-			map[string]string{"status": string(actionitems.StatusDone)},
+			map[string]string{"item_id": item.ID, "status": string(previousStatus)},
+			map[string]string{"item_id": item.ID, "status": string(actionitems.StatusDone)},
 		)
 		if err := s.ChannelMessageDelete(r.ChannelID, r.MessageID); err != nil {
 			log.Printf("deleting completed action item message: %v", err)
@@ -133,8 +133,8 @@ func (b *Bot) handleReactionRemove(s *discordgo.Session, r *discordgo.MessageRea
 		return
 	}
 	b.recordAudit(ctx, r.GuildID, member, actionReactionMarkNew, reason,
-		map[string]string{"status": string(actionitems.StatusInProgress)},
-		map[string]string{"status": string(actionitems.StatusNew)},
+		map[string]string{"item_id": item.ID, "status": string(actionitems.StatusInProgress)},
+		map[string]string{"item_id": item.ID, "status": string(actionitems.StatusNew)},
 	)
 	content := prefixForStatus(actionitems.StatusNew) + item.Description
 	if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{

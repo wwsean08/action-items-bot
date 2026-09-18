@@ -209,8 +209,8 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 	b.recordAudit(ctx, i.GuildID, i.Member, actionUndoSelect, reason,
-		map[string]string{"status": string(item.Status)},
-		map[string]string{"status": string(restoreStatus)},
+		map[string]string{"item_id": itemID, "status": string(item.Status)},
+		map[string]string{"item_id": itemID, "status": string(restoreStatus)},
 	)
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
