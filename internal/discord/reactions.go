@@ -42,7 +42,7 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 		return
 	}
 
-	allowed, err := b.isOwnerOrApprover(ctx, r.GuildID, member)
+	allowed, reason, err := b.isOwnerOrApprover(ctx, r.GuildID, member)
 	if err != nil {
 		log.Printf("checking approver: %v", err)
 		return
@@ -60,6 +60,10 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 			log.Printf("marking in progress: %v", err)
 			return
 		}
+		b.recordAudit(ctx, r.GuildID, member, actionReactionMarkInProgress, reason,
+			map[string]string{"status": string(actionitems.StatusNew)},
+			map[string]string{"status": string(actionitems.StatusInProgress)},
+		)
 		content := prefixForStatus(actionitems.StatusInProgress) + item.Description
 		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 			Channel:         r.ChannelID,
@@ -70,10 +74,15 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 			log.Printf("editing message for in-progress: %v", err)
 		}
 	case actionitems.StatusDone:
+		previousStatus := item.Status
 		if err := b.service.CompleteItem(ctx, item.ID, r.UserID, time.Now()); err != nil {
 			log.Printf("completing action item: %v", err)
 			return
 		}
+		b.recordAudit(ctx, r.GuildID, member, actionReactionMarkDone, reason,
+			map[string]string{"status": string(previousStatus)},
+			map[string]string{"status": string(actionitems.StatusDone)},
+		)
 		if err := s.ChannelMessageDelete(r.ChannelID, r.MessageID); err != nil {
 			log.Printf("deleting completed action item message: %v", err)
 		}
@@ -110,7 +119,7 @@ func (b *Bot) handleReactionRemove(s *discordgo.Session, r *discordgo.MessageRea
 		return
 	}
 
-	allowed, err := b.isOwnerOrApprover(ctx, r.GuildID, member)
+	allowed, reason, err := b.isOwnerOrApprover(ctx, r.GuildID, member)
 	if err != nil {
 		log.Printf("checking approver: %v", err)
 		return
@@ -123,6 +132,10 @@ func (b *Bot) handleReactionRemove(s *discordgo.Session, r *discordgo.MessageRea
 		log.Printf("marking new: %v", err)
 		return
 	}
+	b.recordAudit(ctx, r.GuildID, member, actionReactionMarkNew, reason,
+		map[string]string{"status": string(actionitems.StatusInProgress)},
+		map[string]string{"status": string(actionitems.StatusNew)},
+	)
 	content := prefixForStatus(actionitems.StatusNew) + item.Description
 	if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:         r.ChannelID,

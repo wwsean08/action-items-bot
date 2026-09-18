@@ -108,7 +108,7 @@ func (b *Bot) handleActionItemCommand(s *discordgo.Session, i *discordgo.Interac
 
 func (b *Bot) handleUndoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	allowed, reason, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
 	if err != nil {
 		log.Printf("checking approver: %v", err)
 		_ = respondEphemeral(s, i, "Failed to check permissions.")
@@ -118,6 +118,7 @@ func (b *Bot) handleUndoCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		_ = respondEphemeral(s, i, "You are not authorized to undo action items.")
 		return
 	}
+	b.recordAudit(ctx, i.GuildID, i.Member, actionUndoList, reason, nil, nil)
 
 	items, err := b.service.ListUndoable(ctx, i.GuildID, time.Now())
 	if err != nil {
@@ -155,7 +156,7 @@ func (b *Bot) handleUndoCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	allowed, reason, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
 	if err != nil {
 		log.Printf("checking approver: %v", err)
 		_ = respondEphemeral(s, i, "Failed to check permissions.")
@@ -207,6 +208,10 @@ func (b *Bot) handleUndoSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		_ = respondEphemeral(s, i, "Failed to undo that action item.")
 		return
 	}
+	b.recordAudit(ctx, i.GuildID, i.Member, actionUndoSelect, reason,
+		map[string]string{"status": string(item.Status)},
+		map[string]string{"status": string(restoreStatus)},
+	)
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
@@ -244,7 +249,7 @@ func (b *Bot) handleSearchCommand(s *discordgo.Session, i *discordgo.Interaction
 
 func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx := context.Background()
-	allowed, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
+	allowed, reason, err := b.isOwnerOrApprover(ctx, i.GuildID, i.Member)
 	if err != nil {
 		log.Printf("checking approver: %v", err)
 		_ = respondEphemeral(s, i, "Failed to check permissions.")
@@ -274,6 +279,7 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			_ = respondEphemeral(s, i, "Failed to add approver.")
 			return
 		}
+		b.recordAudit(ctx, i.GuildID, i.Member, actionApproverAdd, reason, nil, map[string]string{"user_id": userID})
 		_ = respondEphemeral(s, i, fmt.Sprintf("Added <@%s> as an approver.", userID))
 		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 			log.Printf("syncing help message: %v", err)
@@ -289,6 +295,7 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			_ = respondEphemeral(s, i, "Failed to remove approver.")
 			return
 		}
+		b.recordAudit(ctx, i.GuildID, i.Member, actionApproverRemove, reason, map[string]string{"user_id": userID}, nil)
 		_ = respondEphemeral(s, i, fmt.Sprintf("Removed <@%s> as an approver.", userID))
 		if err := b.syncHelpMessage(ctx, i.GuildID); err != nil {
 			log.Printf("syncing help message: %v", err)
@@ -300,6 +307,7 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			_ = respondEphemeral(s, i, "Failed to list approvers.")
 			return
 		}
+		b.recordAudit(ctx, i.GuildID, i.Member, actionApproverList, reason, nil, nil)
 		_ = respondEphemeral(s, i, approverListText(approvers))
 	}
 }

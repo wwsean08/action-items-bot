@@ -6,6 +6,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/wwsean08/action-items-bot/internal/actionitems"
+	"github.com/wwsean08/action-items-bot/internal/audit"
 )
 
 const commandAckEmoji = "✅"
@@ -16,9 +17,10 @@ type Bot struct {
 	// botAdminIDs are Discord user IDs treated as the guild owner in every
 	// guild the bot is in, regardless of who actually owns that guild.
 	botAdminIDs map[string]struct{}
+	auditLog    audit.Repository
 }
 
-func New(token string, service *actionitems.Service, botAdminIDs []string) (*Bot, error) {
+func New(token string, service *actionitems.Service, botAdminIDs []string, auditLog audit.Repository) (*Bot, error) {
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		return nil, fmt.Errorf("creating discord session: %w", err)
@@ -37,6 +39,7 @@ func New(token string, service *actionitems.Service, botAdminIDs []string) (*Bot
 		Session:     session,
 		service:     service,
 		botAdminIDs: admins,
+		auditLog:    auditLog,
 	}
 	session.AddHandler(b.handleInteraction)
 	session.AddHandler(b.handleReactionAdd)
