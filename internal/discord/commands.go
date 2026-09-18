@@ -301,13 +301,13 @@ func (b *Bot) handleApproverCommand(s *discordgo.Session, i *discordgo.Interacti
 			log.Printf("syncing help message: %v", err)
 		}
 	case "list":
+		b.recordAudit(ctx, i.GuildID, i.Member, actionApproverList, reason, nil, nil)
 		approvers, err := b.service.ListApprovers(ctx, i.GuildID)
 		if err != nil {
 			log.Printf("list approvers: %v", err)
 			_ = respondEphemeral(s, i, "Failed to list approvers.")
 			return
 		}
-		b.recordAudit(ctx, i.GuildID, i.Member, actionApproverList, reason, nil, nil)
 		_ = respondEphemeral(s, i, approverListText(approvers))
 	}
 }

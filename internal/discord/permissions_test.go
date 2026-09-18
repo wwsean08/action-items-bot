@@ -25,12 +25,11 @@ func (f *fakeAuditRepository) Record(_ context.Context, entry audit.Entry) error
 // GetGuildConfig and ListApprovers); every other method is unused by these
 // tests and returns a zero value.
 type fakeApproverRepository struct {
-	approverRoleID  string
 	approverUserIDs []string
 }
 
 func (f *fakeApproverRepository) GetGuildConfig(_ context.Context, guildID string) (actionitems.GuildConfig, error) {
-	return actionitems.GuildConfig{GuildID: guildID, ApproverRoleID: f.approverRoleID}, nil
+	return actionitems.GuildConfig{GuildID: guildID}, nil
 }
 
 func (f *fakeApproverRepository) ListApprovers(_ context.Context, _ string) ([]string, error) {

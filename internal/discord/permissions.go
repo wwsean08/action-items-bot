@@ -72,7 +72,7 @@ func (b *Bot) isOwnerOrApprover(ctx context.Context, guildID string, member *dis
 // logged but never blocks the caller — audit logging is best-effort
 // observability, not a permission gate.
 func (b *Bot) recordAudit(ctx context.Context, guildID string, member *discordgo.Member, action string, reason audit.Reason, before, after map[string]string) {
-	if b.auditLog == nil {
+	if b.auditLog == nil || member == nil || member.User == nil {
 		return
 	}
 	err := b.auditLog.Record(ctx, audit.Entry{

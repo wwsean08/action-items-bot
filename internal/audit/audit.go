@@ -1,4 +1,5 @@
-// internal/audit/audit.go
+// Package audit records which permission path authorized a privileged
+// Discord action, for traceability.
 package audit
 
 import (

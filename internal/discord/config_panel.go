@@ -157,9 +157,8 @@ func (b *Bot) handleConfigChannelSelect(s *discordgo.Session, i *discordgo.Inter
 
 	before, err := b.service.GetGuildConfig(ctx, i.GuildID)
 	if err != nil {
-		log.Printf("get guild config: %v", err)
-		_ = respondEphemeral(s, i, "Failed to save the channel.")
-		return
+		log.Printf("get guild config for audit before-state: %v", err)
+		// before stays the zero value; the channel save below still proceeds.
 	}
 
 	if err := b.service.SetActionItemsChannel(ctx, i.GuildID, channelID); err != nil {
@@ -191,9 +190,8 @@ func (b *Bot) handleConfigRoleSelect(s *discordgo.Session, i *discordgo.Interact
 
 	before, err := b.service.GetGuildConfig(ctx, i.GuildID)
 	if err != nil {
-		log.Printf("get guild config: %v", err)
-		_ = respondEphemeral(s, i, "Failed to save the approver role.")
-		return
+		log.Printf("get guild config for audit before-state: %v", err)
+		// before stays the zero value; the role save below still proceeds.
 	}
 
 	if err := b.service.SetApproverRole(ctx, i.GuildID, roleID); err != nil {
@@ -275,9 +273,8 @@ func (b *Bot) handleConfigEmotesModalSubmit(s *discordgo.Session, i *discordgo.I
 
 	before, err := b.service.GetGuildConfig(ctx, i.GuildID)
 	if err != nil {
-		log.Printf("get guild config: %v", err)
-		_ = respondEphemeral(s, i, "Failed to save emotes. Make sure both fields are filled in.")
-		return
+		log.Printf("get guild config for audit before-state: %v", err)
+		// before stays the zero value; the emotes save below still proceeds.
 	}
 
 	if err := b.service.SetEmotes(ctx, i.GuildID, inProgress, done); err != nil {

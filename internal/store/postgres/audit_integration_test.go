@@ -35,8 +35,8 @@ func TestRecord_PersistsEntryWithBeforeAfterState(t *testing.T) {
 
 	var (
 		guildID, userID, username, action, reason string
-		before, after                              *string
-		createdAt                                  time.Time
+		before, after                             *string
+		createdAt                                 time.Time
 	)
 	row := repo.pool.QueryRow(ctx,
 		`SELECT guild_id, user_id, username, action, reason, before_state::text, after_state::text, created_at FROM audit_log`)

@@ -1,1 +1,1 @@
-DROP TABLE audit_log;
+DROP TABLE IF EXISTS audit_log;
