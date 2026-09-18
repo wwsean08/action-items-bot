@@ -2,7 +2,7 @@ module github.com/wwsean08/action-items-bot
 
 go 1.26.7
 
-toolchain go1.27.0
+toolchain go1.27
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
